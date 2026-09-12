@@ -1,0 +1,73 @@
+# SecureEdgeVision
+
+SecureEdgeVision is a research-oriented distributed computer-vision system. Computer vision is the workload, edge/distributed computing is the execution architecture, and information security is the research problem.
+
+In privacy mode, an edge worker keeps camera frames local, runs a pretrained Ultralytics YOLO nano detector, creates compact normalized detection metadata, signs each event with a node-specific Ed25519 key, and sends only signed metadata to a central aggregator. The aggregator will verify node identity, signatures, freshness, and replay protection before persisting accepted events and security audit data.
+
+Replicated Byzantine benchmark mode is a separate future research path for public benchmark inputs. It must not be confused with privacy mode: a valid signature proves origin and integrity, not that a detection is semantically correct.
+
+## Current status
+
+The repository is at the Milestone 1 foundation stage. This commit establishes the package layout, locked dependency definition, developer command surface, Compose topology, and import/test scaffolding. The application services and security/data-flow features are intentionally being delivered as later coherent Milestone 1 tasks.
+
+Milestone 1 is the supervisor-demo vertical slice: local YOLO inference, normalized `DetectionEvent` creation, Ed25519 signing, freshness/replay protection, signed metadata transport, FastAPI aggregation, SQLite persistence, security alerts, health/query APIs, a basic dashboard, tests, CI, and demo documentation. Milestones 2–4 remain future work and are not implemented here.
+
+## Technology choices
+
+- Python 3.11 or 3.12 with `uv` and `uv.lock`
+- Ultralytics YOLO nano and OpenCV for local vision processing
+- FastAPI, Uvicorn, Pydantic, and HTTPX for typed service contracts
+- `cryptography` Ed25519 for event authenticity and integrity
+- SQLite and SQLAlchemy for centralized prototype persistence
+- Streamlit and Plotly for the supervisor-facing view
+- `prometheus-client` plus CSV/JSON artifacts for observability and experiments
+- Docker Compose for reproducible process boundaries
+- pytest, Ruff, and targeted mypy for verification
+
+The design deliberately excludes Redis, Kafka, Celery, Kubernetes, React, cloud services, custom detector training, and production PKI infrastructure.
+
+## Repository layout
+
+```text
+secureedgevision/
+├── apps/                 # service entry points; domain logic lives in secureedge/
+├── artifacts/            # reproducible run outputs (local runs are ignored)
+├── config/               # explicit, reviewable configuration examples
+├── data/                 # local inputs; raw media is not committed
+├── docs/                 # architecture, threat model, API, and roadmap notes
+├── scripts/              # operational helpers added by later milestones
+├── secureedge/           # reusable side-effect-free domain package
+└── tests/                # unit and integration coverage
+```
+
+## Development commands
+
+The Makefile is the public command surface. It is intentionally honest about work that is not implemented yet.
+
+```text
+make bootstrap     # synchronize the locked uv environment
+make test          # run the current pytest suite
+make lint          # run Ruff and targeted mypy checks
+make up            # start the Compose topology
+make down          # stop the Compose topology
+make demo          # run the Milestone 1 demo once it is implemented
+make keys          # generate node keys once the security task is implemented
+make attack ...    # future Milestone 2 command
+make experiment ...# future Milestone 3 command
+make verify-runs   # future artifact validation command
+```
+
+Run `uv sync` (or `make bootstrap`) before the test and lint commands. The initial Compose services are importable placeholders; the privacy-mode workflow is not claimed complete until the Build Queue acceptance criteria are satisfied.
+
+## Security boundary
+
+Private keys belong only in the ignored local `secrets/` directory and must never be committed. Privacy-mode workers must never send raw camera frames to the aggregator. Thresholds such as clock skew, nonce TTL, request size, confidence, and image size belong in configuration, not hidden code constants. Signatures authenticate the node and signed bytes; they do not validate the truth of a detector’s output.
+
+## Milestone roadmap
+
+1. **Supervisor demo:** privacy-mode vertical slice and its security controls.
+2. **Replicated resilience:** public benchmark jobs, authenticated malicious workers, matching, aggregation, and trust history.
+3. **Research experiments:** centralized baseline, reproducible E1–E5 runs, metrics, artifacts, and plots.
+4. **Final integration:** broader dashboard, topology hardening, reproducibility validation, and FYP completion.
+
+See the GitHub issue `[AUTO] SecureEdgeVision Build Queue` for the authoritative current task, acceptance criteria, handoffs, and progress.

@@ -1,0 +1,67 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "secureedgevision"
+version = "0.1.0"
+description = "Privacy-preserving and Byzantine-resilient distributed computer vision at the edge"
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+license = { text = "Research prototype" }
+authors = [{ name = "SecureEdgeVision contributors" }]
+dependencies = [
+    "cryptography>=44,<47",
+    "fastapi>=0.115,<1",
+    "httpx>=0.28,<1",
+    "opencv-python-headless>=4.10,<5",
+    "plotly>=6,<7",
+    "prometheus-client>=0.21,<1",
+    "pydantic>=2.10,<3",
+    "pydantic-settings>=2.7,<3",
+    "pyyaml>=6,<7",
+    "sqlalchemy>=2,<3",
+    "streamlit>=1.41,<2",
+    "ultralytics>=8.3,<9",
+    "uvicorn[standard]>=0.34,<1",
+]
+
+[dependency-groups]
+dev = [
+    "mypy>=1.14,<2",
+    "pytest>=8.3,<9",
+    "pytest-asyncio>=0.25,<1",
+    "ruff>=0.9,<1",
+]
+
+[project.scripts]
+secureedgevision-aggregator = "apps.aggregator.main:main"
+secureedgevision-worker = "apps.worker.main:main"
+secureedgevision-dashboard = "apps.dashboard.app:main"
+secureedgevision-experiment-runner = "apps.experiment_runner.main:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["secureedge", "apps"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+src = ["apps", "secureedge", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.mypy]
+python_version = "3.11"
+files = ["apps", "secureedge"]
+check_untyped_defs = true
+disallow_incomplete_defs = true
+disallow_untyped_defs = true
+ignore_missing_imports = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true

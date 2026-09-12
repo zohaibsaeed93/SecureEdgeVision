@@ -1,0 +1,10 @@
+nodes:
+  - node_id: edge-1
+    camera_id: cam-1
+    public_key_path: /keys/edge-1.pub
+  - node_id: edge-2
+    camera_id: cam-2
+    public_key_path: /keys/edge-2.pub
+  - node_id: edge-3
+    camera_id: cam-3
+    public_key_path: /keys/edge-3.pub

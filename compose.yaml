@@ -1,0 +1,54 @@
+services:
+  aggregator:
+    build: .
+    command: ["python", "-m", "apps.aggregator.main"]
+    environment:
+      PYTHONPATH: /app
+      SEV_CONFIG_PATH: /app/config/system.yaml
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./config:/app/config:ro
+      - ./state:/app/state
+    networks: [control]
+
+  worker:
+    build: .
+    command: ["python", "-m", "apps.worker.main"]
+    environment:
+      PYTHONPATH: /app
+      NODE_ID: edge-1
+      SEV_CONFIG_PATH: /app/config/system.yaml
+    depends_on: [aggregator]
+    volumes:
+      - ./config:/app/config:ro
+      - ./data:/app/data:ro
+      - ./secrets/edge-1:/app/keys:ro
+    networks: [control]
+
+  dashboard:
+    build: .
+    command: ["python", "-m", "apps.dashboard.app"]
+    environment:
+      PYTHONPATH: /app
+      SEV_AGGREGATOR_URL: http://aggregator:8000
+    depends_on: [aggregator]
+    ports:
+      - "8501:8501"
+    networks: [control]
+
+  experiment-runner:
+    build: .
+    command: ["python", "-m", "apps.experiment_runner.main"]
+    environment:
+      PYTHONPATH: /app
+      SEV_AGGREGATOR_URL: http://aggregator:8000
+    depends_on: [aggregator]
+    volumes:
+      - ./config:/app/config:ro
+      - ./artifacts:/app/artifacts
+    networks: [control]
+
+networks:
+  control:
+    driver: bridge

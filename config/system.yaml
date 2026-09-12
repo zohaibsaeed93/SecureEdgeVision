@@ -1,0 +1,23 @@
+mode: privacy
+aggregator_url: http://aggregator:8000
+
+security:
+  max_clock_skew_seconds: 30
+  nonce_ttl_seconds: 300
+  max_request_bytes: 262144
+
+vision:
+  model: yolo26n.pt
+  device: auto
+  image_size: 640
+  confidence: 0.25
+  frame_sample_fps: 2
+
+# These values are reserved for the future replicated benchmark mode. They are
+# kept explicit here so later experiments do not hide thresholds in code.
+consensus:
+  policy: trust_weighted
+  iou_threshold: 0.50
+  accept_threshold: 0.60
+  alpha: 0.85
+  trust_min: 0.05

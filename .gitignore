@@ -1,0 +1,46 @@
+# Python and local environments
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Local configuration, state, and secrets
+.env
+.env.*
+!.env.example
+secrets/
+state/
+*.key
+*.pem
+*.p12
+*.pfx
+*.private
+*_private.*
+
+# Model weights, caches, and local media
+*.pt
+*.onnx
+*.engine
+model_cache/
+ultralytics_cache/
+data/local/
+data/raw/
+data/*.jpg
+data/*.jpeg
+data/*.png
+data/*.mp4
+data/*.avi
+data/*.mov
+
+# Generated experiment output
+artifacts/runs/*
+!artifacts/runs/.gitkeep
+
+# Files supplied by the ChatGPT project mirror, not project source
+AGENTS.md
+sources/
