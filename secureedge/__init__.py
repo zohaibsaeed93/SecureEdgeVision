@@ -15,6 +15,16 @@ from secureedge.contracts import (
     PerformanceMetrics,
     SignedDetectionEnvelope,
 )
+from secureedge.crypto import (
+    KeyMaterialError,
+    encode_public_key,
+    generate_private_key,
+    load_private_key,
+    load_public_key,
+    serialize_private_key,
+    sign_detection_event,
+    verify_detection_envelope,
+)
 
 __version__ = "0.1.0"
 
@@ -29,4 +39,12 @@ __all__ = [
     "SignedDetectionEnvelope",
     "__version__",
     "canonical_event_bytes",
+    "KeyMaterialError",
+    "encode_public_key",
+    "generate_private_key",
+    "load_private_key",
+    "load_public_key",
+    "serialize_private_key",
+    "sign_detection_event",
+    "verify_detection_envelope",
 ]

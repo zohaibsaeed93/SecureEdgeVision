@@ -51,13 +51,20 @@ make lint          # run Ruff and targeted mypy checks
 make up            # start the Compose topology
 make down          # stop the Compose topology
 make demo          # run the Milestone 1 demo once it is implemented
-make keys          # generate node keys once the security task is implemented
+make keys NODE_ID=edge-1 [KEY_DIR=secrets]  # generate local demo keys
 make attack ...    # future Milestone 2 command
 make experiment ...# future Milestone 3 command
 make verify-runs   # future artifact validation command
 ```
 
 Run `uv sync` (or `make bootstrap`) before the test and lint commands. The initial Compose services are importable placeholders; the privacy-mode workflow is not claimed complete until the Build Queue acceptance criteria are satisfied.
+
+`make keys NODE_ID=edge-1` writes an unencrypted PKCS#8 PEM private key and a
+canonical base64 raw public key under the ignored `secrets/` directory. The
+command requires a safe node ID, refuses to overwrite either target, and never
+prints private key bytes. Use `KEY_DIR` to select another local directory. These
+demo keys rely on filesystem permissions; production key custody, rotation, and
+revocation are outside this milestone.
 
 ## Security boundary
 
