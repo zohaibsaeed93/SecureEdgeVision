@@ -63,3 +63,19 @@ wire representation. Deterministic canonicalization, signing, verification,
 freshness, replay enforcement, and API behavior are separate Milestone 1 tasks.
 A valid signature will establish origin and byte integrity, not the semantic
 correctness of a detection.
+
+### Canonical signed content
+
+The canonical signed content is the validated `DetectionEvent` in the envelope's
+`body`, not the full envelope. `signature_algorithm`, `signature_b64`, key material,
+and transport metadata are excluded. `canonical_event_bytes` converts the event to
+its Pydantic JSON-compatible representation and emits UTF-8 JSON with recursively
+sorted object keys, compact `,` and `:` separators, direct Unicode encoding, no
+insignificant whitespace or trailing newline, and no NaN or Infinity values.
+
+Array order remains significant, including the order of `detections`. UTC timestamps
+are normalized through the validated model's JSON representation, so equivalent UTC
+inputs produce the same bytes. This deterministic representation is the input for a
+later Ed25519 signing and verification task; this layer does not perform cryptography,
+authenticate a node, prevent replay, or establish that a detection is semantically
+correct.
