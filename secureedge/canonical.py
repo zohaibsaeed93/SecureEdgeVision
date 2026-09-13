@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 
+from pydantic import TypeAdapter
+
 from secureedge.contracts import DetectionEvent
 
 
@@ -18,7 +20,9 @@ def canonical_event_bytes(event: DetectionEvent) -> bytes:
         raise TypeError("event must be a DetectionEvent")
 
     try:
-        json_value = event.model_dump(mode="json")
+        # Serialize through the authoritative base schema so subclasses cannot
+        # extend or override the signed body boundary.
+        json_value = TypeAdapter(DetectionEvent).dump_python(event, mode="json")
         canonical_json = json.dumps(
             json_value,
             sort_keys=True,

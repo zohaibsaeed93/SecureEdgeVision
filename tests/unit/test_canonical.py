@@ -179,6 +179,21 @@ def test_envelope_and_signature_fields_are_excluded_by_construction() -> None:
         canonical_event_bytes(first_envelope)  # type: ignore[arg-type]
 
 
+def test_subclass_fields_cannot_extend_the_signed_body() -> None:
+    class ExtendedDetectionEvent(DetectionEvent):
+        signature_b64: str
+
+    event = ExtendedDetectionEvent.model_validate(
+        {**_event_data(), "signature_b64": "attacker-controlled"}
+    )
+
+    canonical = canonical_event_bytes(event)
+
+    assert canonical == GOLDEN_EVENT_BYTES
+    assert b"signature_b64" not in canonical
+    assert b"attacker-controlled" not in canonical
+
+
 @pytest.mark.parametrize("non_finite", [float("nan"), float("inf"), float("-inf")])
 def test_non_finite_values_fail_closed(non_finite: float) -> None:
     event = DetectionEvent.model_validate(_event_data())
