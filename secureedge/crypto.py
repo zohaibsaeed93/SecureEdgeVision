@@ -15,6 +15,10 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
 from secureedge.canonical import canonical_event_bytes
 from secureedge.contracts import DetectionEvent, SignedDetectionEnvelope
 
+_PKCS8_PEM_BEGIN = b"-----BEGIN PRIVATE KEY-----"
+_PKCS8_PEM_END = b"-----END PRIVATE KEY-----"
+_PEM_BOUNDARY_WHITESPACE = b" \t\r\n"
+
 
 class KeyMaterialError(ValueError):
     """Raised when supplied key or signature material is not supported."""
@@ -72,6 +76,7 @@ def load_private_key(pem_data: bytes) -> Ed25519PrivateKey:
     if not isinstance(pem_data, bytes):
         raise KeyMaterialError("private key material must be PKCS#8 PEM bytes")
 
+    _require_single_pkcs8_pem(pem_data)
     try:
         loaded_key = serialization.load_pem_private_key(pem_data, password=None)
     except (TypeError, ValueError, UnsupportedAlgorithm) as exc:
@@ -124,6 +129,17 @@ def verify_detection_envelope(
     except (TypeError, ValueError) as exc:
         raise KeyMaterialError("signed envelope body is invalid") from exc
     return True
+
+
+def _require_single_pkcs8_pem(pem_data: bytes) -> None:
+    stripped = pem_data.strip(_PEM_BOUNDARY_WHITESPACE)
+    if (
+        not stripped.startswith(_PKCS8_PEM_BEGIN)
+        or not stripped.endswith(_PKCS8_PEM_END)
+        or stripped.count(_PKCS8_PEM_BEGIN) != 1
+        or stripped.count(_PKCS8_PEM_END) != 1
+    ):
+        raise KeyMaterialError("private key material is invalid or unsupported")
 
 
 def _decode_canonical_base64(value: object, *, label: str, byte_length: int) -> bytes:

@@ -103,7 +103,11 @@ def test_failed_second_file_write_cleans_only_new_first_file(
     real_write_exclusive = generate_node_keys._write_exclusive
     calls = 0
 
-    def fail_second(path: Path, data: bytes, created: list[tuple[Path, int, int]]) -> None:
+    def fail_second(
+        path: Path,
+        data: bytes,
+        created: list[tuple[Path, int | None, int | None]],
+    ) -> None:
         nonlocal calls
         calls += 1
         if calls == 2:
@@ -116,6 +120,54 @@ def test_failed_second_file_write_cleans_only_new_first_file(
 
     assert not (tmp_path / "edge-1.key").exists()
     assert not (tmp_path / "edge-1.pub").exists()
+
+
+def test_post_create_fstat_failure_closes_descriptor_and_cleans_pair(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    real_fstat = os.fstat
+    calls = 0
+    failed_descriptor: int | None = None
+
+    def fail_second_fstat(descriptor: int) -> os.stat_result:
+        nonlocal calls, failed_descriptor
+        calls += 1
+        if calls == 2:
+            failed_descriptor = descriptor
+            raise OSError("simulated post-create fstat failure")
+        return real_fstat(descriptor)
+
+    monkeypatch.setattr(generate_node_keys.os, "fstat", fail_second_fstat)
+    with pytest.raises(generate_node_keys.KeyGenerationError, match="write"):
+        generate_node_keys.generate_node_key_files("edge-1", tmp_path)
+
+    assert list(tmp_path.iterdir()) == []
+    assert failed_descriptor is not None
+    with pytest.raises(OSError):
+        real_fstat(failed_descriptor)
+
+
+def test_post_create_fchmod_failure_closes_descriptor_and_cleans_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    real_fstat = os.fstat
+    failed_descriptor: int | None = None
+
+    def fail_fchmod(descriptor: int, mode: int) -> None:
+        nonlocal failed_descriptor
+        failed_descriptor = descriptor
+        raise OSError("simulated post-create fchmod failure")
+
+    monkeypatch.setattr(generate_node_keys.os, "fchmod", fail_fchmod)
+    with pytest.raises(generate_node_keys.KeyGenerationError, match="write"):
+        generate_node_keys.generate_node_key_files("edge-1", tmp_path)
+
+    assert list(tmp_path.iterdir()) == []
+    assert failed_descriptor is not None
+    with pytest.raises(OSError):
+        real_fstat(failed_descriptor)
 
 
 def test_key_script_import_is_side_effect_free(monkeypatch: pytest.MonkeyPatch) -> None:

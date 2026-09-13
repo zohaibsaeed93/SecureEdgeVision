@@ -114,6 +114,23 @@ def test_private_key_loader_rejects_wrong_algorithm_and_encrypted_pem() -> None:
         load_private_key(encrypted_pem)
 
 
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda pem: b"PREFIX-GARBAGE" + pem,
+        lambda pem: pem + b"TRAILING-GARBAGE",
+        lambda pem: pem + serialize_private_key(generate_private_key()),
+    ],
+)
+def test_private_key_loader_rejects_additional_material(
+    mutate: Any,
+) -> None:
+    pem = serialize_private_key(generate_private_key())
+
+    with pytest.raises(KeyMaterialError, match="private key material"):
+        load_private_key(mutate(pem))
+
+
 def test_signing_is_deterministic_and_verification_accepts_the_exact_body() -> None:
     private_key = generate_private_key()
     event = _event()

@@ -52,7 +52,7 @@ def generate_node_key_files(node_id: str, output_dir: Path | str = "secrets") ->
     private_pem = serialize_private_key(private_key)
     public_key_b64 = encode_public_key(private_key.public_key())
     public_b64 = public_key_b64.encode("ascii")
-    created: list[tuple[Path, int, int]] = []
+    created: list[tuple[Path, int | None, int | None]] = []
 
     try:
         _write_exclusive(private_path, private_pem, created)
@@ -130,7 +130,11 @@ def _reject_existing_targets(*paths: Path) -> None:
         raise KeyGenerationError("refusing to overwrite an existing key target")
 
 
-def _write_exclusive(path: Path, data: bytes, created: list[tuple[Path, int, int]]) -> None:
+def _write_exclusive(
+    path: Path,
+    data: bytes,
+    created: list[tuple[Path, int | None, int | None]],
+) -> None:
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
     no_follow = getattr(os, "O_NOFOLLOW", 0)
     if no_follow:
@@ -143,18 +147,27 @@ def _write_exclusive(path: Path, data: bytes, created: list[tuple[Path, int, int
     except OSError as exc:
         raise KeyGenerationError("could not create a key file") from exc
 
-    descriptor_stat = os.fstat(descriptor)
-    created.append((path, descriptor_stat.st_dev, descriptor_stat.st_ino))
+    created_index = len(created)
+    created.append((path, None, None))
     try:
+        descriptor_stat = os.fstat(descriptor)
+        created[created_index] = (path, descriptor_stat.st_dev, descriptor_stat.st_ino)
         if hasattr(os, "fchmod"):
             os.fchmod(descriptor, 0o600)
         with os.fdopen(descriptor, "wb", closefd=True) as stream:
+            descriptor = None
             stream.write(data)
             stream.flush()
             if hasattr(os, "fsync"):
                 os.fsync(stream.fileno())
     except OSError as exc:
         raise KeyGenerationError("could not write a key file") from exc
+    finally:
+        if descriptor is not None:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
 
     try:
         final_stat = os.lstat(path)
@@ -168,7 +181,7 @@ def _write_exclusive(path: Path, data: bytes, created: list[tuple[Path, int, int
         raise KeyGenerationError("key file verification failed")
 
 
-def _cleanup_created(created: list[tuple[Path, int, int]]) -> None:
+def _cleanup_created(created: list[tuple[Path, int | None, int | None]]) -> None:
     for path, device, inode in reversed(created):
         try:
             current = os.lstat(path)
@@ -176,11 +189,20 @@ def _cleanup_created(created: list[tuple[Path, int, int]]) -> None:
             continue
         except OSError:
             continue
-        if (
-            stat.S_ISREG(current.st_mode)
+        unverified_empty_file = (
+            device is None
+            and inode is None
+            and stat.S_ISREG(current.st_mode)
+            and current.st_size == 0
+        )
+        verified_created_file = (
+            device is not None
+            and inode is not None
+            and stat.S_ISREG(current.st_mode)
             and current.st_dev == device
             and current.st_ino == inode
-        ):
+        )
+        if unverified_empty_file or verified_created_file:
             try:
                 os.unlink(path)
             except OSError:
