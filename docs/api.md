@@ -59,8 +59,9 @@ The signed envelope is exactly
 `{body, signature_algorithm: "ed25519", signature_b64}`. `body` is a typed
 `DetectionEvent`, and `signature_b64` is the canonical standard-base64
 representation of a 64-byte Ed25519 signature. This layer validates only the
-wire representation. Deterministic canonicalization, signing, verification,
-freshness, replay enforcement, and API behavior are separate Milestone 1 tasks.
+wire representation. Deterministic canonicalization and the reusable Ed25519
+signing/verification primitives are separate domain layers. Freshness, replay
+enforcement, and API behavior are separate Milestone 1 tasks.
 A valid signature will establish origin and byte integrity, not the semantic
 correctness of a detection.
 
@@ -75,7 +76,25 @@ insignificant whitespace or trailing newline, and no NaN or Infinity values.
 
 Array order remains significant, including the order of `detections`. UTC timestamps
 are normalized through the validated model's JSON representation, so equivalent UTC
-inputs produce the same bytes. This deterministic representation is the input for a
-later Ed25519 signing and verification task; this layer does not perform cryptography,
+inputs produce the same bytes. This deterministic representation is the input for the
+separate Ed25519 signing and verification layer; this layer does not perform cryptography,
 authenticate a node, prevent replay, or establish that a detection is semantically
 correct.
+
+### Ed25519 key material and local demo generation
+
+`secureedge.crypto` generates keys with `Ed25519PrivateKey.generate()`. Public
+keys are encoded as canonical standard base64 of the 32-byte raw Ed25519 public
+key, matching `NodeRegistration.public_key_b64`. Local private keys are written
+as unencrypted PKCS#8 PEM only by the explicit command:
+
+```text
+make keys NODE_ID=edge-1 [KEY_DIR=secrets]
+```
+
+The command writes `<node_id>.key` and `<node_id>.pub` under the ignored local
+directory, refuses unsafe IDs, pre-existing files, and symlink targets, and
+cleans up a newly created partial pair if the second write fails. It reports
+paths and public material only; it never prints or sends private key bytes.
+Unencrypted local demo keys rely on filesystem permissions. Key custody,
+rotation, revocation, PKI, and TLS are not claimed by this milestone.
