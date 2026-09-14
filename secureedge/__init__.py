@@ -25,6 +25,13 @@ from secureedge.crypto import (
     sign_detection_event,
     verify_detection_envelope,
 )
+from secureedge.security import (
+    EventSecurityConfigurationError,
+    EventSecurityDecision,
+    EventSecurityReason,
+    EventSecurityRejection,
+    ReplayFreshnessPolicy,
+)
 
 __version__ = "0.1.0"
 
@@ -47,4 +54,9 @@ __all__ = [
     "serialize_private_key",
     "sign_detection_event",
     "verify_detection_envelope",
+    "EventSecurityConfigurationError",
+    "EventSecurityDecision",
+    "EventSecurityReason",
+    "EventSecurityRejection",
+    "ReplayFreshnessPolicy",
 ]
