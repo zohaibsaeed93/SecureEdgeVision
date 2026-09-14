@@ -13,3 +13,18 @@ randomness, refuses unsafe IDs, refuses overwrites and symlink targets, and
 removes only newly created partial files after a failed pair write. Filesystem
 permissions protect the unencrypted demo private key; this is not production key
 custody, rotation, revocation, PKI, or TLS.
+
+After signature verification, the reusable `ReplayFreshnessPolicy` rejects events
+outside the inclusive configured UTC clock-skew window and prevents reuse of both
+`event_id` and `nonce` within each `node_id`. Checking and reserving both identifiers
+is one lock-protected operation, so concurrent duplicate submissions cannot both be
+accepted or leave a partial reservation. Rejections use stable reason codes and do
+not include event identifiers, nonces, payloads, or key material in their messages.
+
+Replay state is deliberately process-local for Milestone 1. It is neither durable
+across restarts nor coordinated across multiple aggregator processes; deployment
+must therefore use one aggregator process for the supervisor demo. Entries remain
+protected through the later of the configured nonce TTL and the final instant at
+which the original signed timestamp could pass freshness, then are lazily pruned.
+Distributed or durable replay prevention belongs to later architecture work and is
+not claimed here.

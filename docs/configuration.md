@@ -22,3 +22,19 @@ and missing fields fail closed with a field-specific `ConfigurationError`.
 Node identity, camera identity, database URLs, and logging settings are separate
 application concerns. Private keys and credentials are never system-setting
 overrides and must not be committed.
+
+## Replay and timestamp settings
+
+`security.max_clock_skew_seconds` defines an inclusive past/future UTC window for
+an already authenticated detection event. A timestamp exactly one configured skew
+away from the injected current time is accepted; an older timestamp is
+`stale_timestamp`, and a later timestamp is `future_timestamp`. The clock must
+return an aware UTC `datetime` or the policy fails closed.
+
+`security.nonce_ttl_seconds` is the minimum process-local reservation time for both
+the event ID and nonce, scoped by node. The effective reservation is extended when
+necessary through `event.timestamp_utc + max_clock_skew_seconds`, preventing a
+short TTL from making an otherwise fresh signed event reusable. Expiration is
+inclusive and expired entries are pruned deterministically during later accepted
+checks. Both thresholds come only from validated configuration; there are no
+hard-coded service overrides or background cleanup workers.

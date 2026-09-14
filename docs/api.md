@@ -60,8 +60,9 @@ The signed envelope is exactly
 `DetectionEvent`, and `signature_b64` is the canonical standard-base64
 representation of a 64-byte Ed25519 signature. This layer validates only the
 wire representation. Deterministic canonicalization and the reusable Ed25519
-signing/verification primitives are separate domain layers. Freshness, replay
-enforcement, and API behavior are separate Milestone 1 tasks.
+signing/verification primitives are separate domain layers. The process-local
+freshness/replay policy described below is another separate domain layer; API
+wiring remains a later Milestone 1 task.
 A valid signature will establish origin and byte integrity, not the semantic
 correctness of a detection.
 
@@ -98,3 +99,20 @@ cleans up a newly created partial pair if the second write fails. It reports
 paths and public material only; it never prints or sends private key bytes.
 Unencrypted local demo keys rely on filesystem permissions. Key custody,
 rotation, revocation, PKI, and TLS are not claimed by this milestone.
+
+### Authenticated-event freshness and replay policy
+
+`ReplayFreshnessPolicy.accept_verified_event()` consumes a validated
+`DetectionEvent` only after its Ed25519 envelope has been authenticated by the
+caller. It accepts timestamps at the inclusive edges of the configured clock-skew
+window and otherwise raises `EventSecurityRejection` with one stable reason:
+`stale_timestamp`, `future_timestamp`, `replayed_event_id`, or `replayed_nonce`.
+The later FastAPI adapter can map those rejections to the planned `409` response
+without inspecting exception text.
+
+Replay identity is scoped by `node_id`: both an event ID and nonce are reserved
+atomically for that node. State belongs to one policy instance and is held only in
+process memory. The returned `EventSecurityDecision` reports the UTC acceptance
+instant and replay-protection horizon but contains no frame, detection payload, key,
+or credential. This layer performs no signature verification, persistence, HTTP,
+or semantic validation of detections.
