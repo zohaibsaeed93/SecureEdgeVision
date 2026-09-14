@@ -62,6 +62,11 @@ class MutableClock:
         return cast(datetime, self.current)
 
 
+class ExplodingDateTime(datetime):
+    def utcoffset(self) -> timedelta | None:
+        raise RuntimeError("sensitive-tz-detail")
+
+
 @pytest.mark.parametrize("offset_seconds", [-30, 0, 30])
 def test_accepts_inclusive_timestamp_boundaries(offset_seconds: int) -> None:
     policy = ReplayFreshnessPolicy(_settings(), clock=lambda: NOW)
@@ -237,6 +242,35 @@ def test_invalid_clock_fails_closed_without_reserving_event(invalid_now: object)
     policy.accept_verified_event(_event())
 
 
+def test_malformed_clock_datetime_is_sanitized_and_does_not_reserve_event() -> None:
+    clock = MutableClock(ExplodingDateTime(2026, 9, 14, 1, 0, tzinfo=UTC))
+    policy = ReplayFreshnessPolicy(_settings(), clock=clock)
+
+    with pytest.raises(EventSecurityConfigurationError) as exc_info:
+        policy.accept_verified_event(_event())
+
+    assert "sensitive-tz-detail" not in str(exc_info.value)
+    assert exc_info.value.__cause__ is None
+    clock.current = NOW
+    policy.accept_verified_event(_event())
+
+
+def test_malformed_event_datetime_is_sanitized_and_does_not_reserve_event() -> None:
+    policy = ReplayFreshnessPolicy(_settings(), clock=lambda: NOW)
+    malformed = _event().model_copy(
+        update={
+            "timestamp_utc": ExplodingDateTime(2026, 9, 14, 1, 0, tzinfo=UTC),
+        }
+    )
+
+    with pytest.raises(EventSecurityConfigurationError) as exc_info:
+        policy.accept_verified_event(malformed)
+
+    assert "sensitive-tz-detail" not in str(exc_info.value)
+    assert exc_info.value.__cause__ is None
+    policy.accept_verified_event(_event())
+
+
 def test_clock_failure_and_invalid_event_do_not_leak_values_or_mutate_state() -> None:
     private_detail = "camera-secret-value"
 
@@ -297,6 +331,32 @@ def test_constructor_revalidates_settings_and_does_not_read_clock() -> None:
     )
     with pytest.raises(EventSecurityConfigurationError, match="settings"):
         ReplayFreshnessPolicy(invalid)
+
+
+def test_clock_rollback_after_pruning_fails_closed_without_reservation() -> None:
+    clock = MutableClock(NOW)
+    policy = ReplayFreshnessPolicy(_settings(skew=1, ttl=1), clock=clock)
+    original = _event()
+    policy.accept_verified_event(original)
+
+    after_horizon = NOW + timedelta(seconds=1, microseconds=1)
+    clock.current = after_horizon
+    policy.accept_verified_event(
+        _event(
+            timestamp=after_horizon,
+            event_id="pruning-event",
+            nonce="pruning-nonce",
+        )
+    )
+
+    clock.current = NOW
+    with pytest.raises(EventSecurityConfigurationError, match="clock moved backwards"):
+        policy.accept_verified_event(original)
+
+    clock.current = after_horizon
+    policy.accept_verified_event(
+        _event(timestamp=after_horizon, event_id=original.event_id, nonce=original.nonce)
+    )
 
 
 def test_concurrent_duplicate_check_and_record_is_atomic() -> None:

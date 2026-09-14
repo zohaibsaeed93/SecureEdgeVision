@@ -38,3 +38,8 @@ short TTL from making an otherwise fresh signed event reusable. Expiration is
 inclusive and expired entries are pruned deterministically during later accepted
 checks. Both thresholds come only from validated configuration; there are no
 hard-coded service overrides or background cleanup workers.
+
+Each policy instance records the latest UTC instant at which it accepted an event.
+If the wall clock later moves behind that high-water mark, checks fail closed until
+the clock catches up. This prevents a forward adjustment, pruning, and subsequent
+rollback from making an earlier signed event fresh and replayable again.

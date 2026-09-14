@@ -26,5 +26,7 @@ across restarts nor coordinated across multiple aggregator processes; deployment
 must therefore use one aggregator process for the supervisor demo. Entries remain
 protected through the later of the configured nonce TTL and the final instant at
 which the original signed timestamp could pass freshness, then are lazily pruned.
+The policy also rejects wall-clock rollback behind its latest accepted instant, so
+a forward jump cannot prune identifiers and a later backward jump reopen them.
 Distributed or durable replay prevention belongs to later architecture work and is
 not claimed here.

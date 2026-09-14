@@ -110,6 +110,11 @@ window and otherwise raises `EventSecurityRejection` with one stable reason:
 The later FastAPI adapter can map those rejections to the planned `409` response
 without inspecting exception text.
 
+The policy normalizes accepted clock and event timestamps to plain UTC datetimes.
+Malformed datetime behavior and a clock that moves behind the latest accepted
+instant fail closed through a sanitized `EventSecurityConfigurationError`; the
+underlying exception text and event values are not exposed.
+
 Replay identity is scoped by `node_id`: both an event ID and nonce are reserved
 atomically for that node. State belongs to one policy instance and is held only in
 process memory. The returned `EventSecurityDecision` reports the UTC acceptance

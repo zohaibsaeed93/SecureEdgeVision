@@ -8,8 +8,6 @@ from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from threading import Lock
 
-from pydantic import ValidationError
-
 from secureedge.config import SecuritySettings
 from secureedge.contracts import DetectionEvent
 
@@ -73,7 +71,7 @@ def _validated_settings(settings: SecuritySettings) -> SecuritySettings:
             },
             strict=True,
         )
-    except (AttributeError, TypeError, ValidationError):
+    except Exception:
         raise EventSecurityConfigurationError("security settings must be valid") from None
 
 
@@ -81,12 +79,26 @@ def _require_utc_datetime(value: object, *, source: str) -> datetime:
     if not isinstance(value, datetime):
         raise EventSecurityConfigurationError(f"{source} must provide a UTC datetime")
     try:
+        tzinfo = value.tzinfo
         offset = value.utcoffset()
-    except (OverflowError, ValueError):
+        is_utc = tzinfo is not None and offset is not None and offset == timedelta(0)
+        if is_utc:
+            normalized = datetime(
+                value.year,
+                value.month,
+                value.day,
+                value.hour,
+                value.minute,
+                value.second,
+                value.microsecond,
+                tzinfo=UTC,
+                fold=value.fold,
+            )
+    except Exception:
         raise EventSecurityConfigurationError(f"{source} must provide a UTC datetime") from None
-    if value.tzinfo is None or offset is None or offset != timedelta(0):
+    if not is_utc:
         raise EventSecurityConfigurationError(f"{source} must provide a UTC datetime")
-    return value
+    return normalized
 
 
 def _validated_event(event: DetectionEvent) -> DetectionEvent:
@@ -95,7 +107,7 @@ def _validated_event(event: DetectionEvent) -> DetectionEvent:
     try:
         event_data = event.model_dump(mode="python", warnings="error")
         return DetectionEvent.model_validate(event_data, strict=True)
-    except (TypeError, ValueError):
+    except Exception:
         raise EventSecurityConfigurationError(
             "event must be a validated DetectionEvent"
         ) from None
@@ -115,6 +127,7 @@ class ReplayFreshnessPolicy:
             raise EventSecurityConfigurationError("security clock must be callable")
         self._clock = clock or _system_utc_now
         self._seen: dict[_ReplayKey, datetime] = {}
+        self._latest_accepted_at_utc: datetime | None = None
         self._lock = Lock()
 
     def accept_verified_event(self, event: DetectionEvent) -> EventSecurityDecision:
@@ -176,6 +189,12 @@ class ReplayFreshnessPolicy:
         )
 
         with self._lock:
+            if (
+                self._latest_accepted_at_utc is not None
+                and now < self._latest_accepted_at_utc
+            ):
+                raise EventSecurityConfigurationError("security clock moved backwards")
+
             retained = {
                 key: expires_at
                 for key, expires_at in self._seen.items()
@@ -190,6 +209,7 @@ class ReplayFreshnessPolicy:
             # failures cannot leave only one identifier reserved.
             retained.update({event_key: replay_expiry, nonce_key: replay_expiry})
             self._seen = retained
+            self._latest_accepted_at_utc = now
 
         return decision
 
