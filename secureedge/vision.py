@@ -517,4 +517,15 @@ def _optional_attr(target: Any, attribute: str) -> Any:
     except Exception as exc:
         raise VisionError("YOLO output could not be inspected") from exc
 
-
+__all__ = [
+    "DetectorBackend",
+    "LocalYOLODetector",
+    "LocalYoloDetector",
+    "ModelFactory",
+    "VisionError",
+    "VisionResult",
+    "YoloDetector",
+    "create_yolo_detector",
+    "detect_frame",
+    "infer_frame",
+]
