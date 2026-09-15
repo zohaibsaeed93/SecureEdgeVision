@@ -353,13 +353,13 @@ def _convert_results(
     )
 
     raw_track_ids = _optional_attr(boxes, "id")
-    if raw_track_ids is None:
+    if raw_track_ids is _MISSING or raw_track_ids is None:
         track_values: list[Any] = [None] * count
     else:
         track_values = _vector(raw_track_ids, count, "track IDs")
 
     names = _optional_attr(result, "names")
-    if names is None:
+    if names is _MISSING or names is None:
         names = _optional_attr(backend, "names")
 
     detections: list[Detection] = []

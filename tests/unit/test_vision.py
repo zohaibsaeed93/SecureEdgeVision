@@ -149,6 +149,20 @@ def test_empty_detection_output_is_successful(tmp_path: Path) -> None:
     assert result.detections == ()
 
 
+def test_absent_optional_metadata_uses_safe_defaults(tmp_path: Path) -> None:
+    boxes = SimpleNamespace(
+        xyxy=FakeTensor([[1.0, 1.0, 4.0, 4.0]]),
+        conf=FakeTensor([0.9]),
+        cls=FakeTensor([0]),
+    )
+    detector, _ = _detector(tmp_path, boxes)
+
+    result = detector.infer(np.zeros((5, 5, 3), dtype=np.uint8))
+
+    assert result.detections[0].class_name == "person"
+    assert result.detections[0].track_id is None
+
+
 @pytest.mark.parametrize(
     "bad_boxes",
     [
