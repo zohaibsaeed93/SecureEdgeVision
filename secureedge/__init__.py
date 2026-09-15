@@ -32,6 +32,18 @@ from secureedge.security import (
     EventSecurityRejection,
     ReplayFreshnessPolicy,
 )
+from secureedge.vision import (
+    DetectorBackend,
+    LocalYOLODetector,
+    LocalYoloDetector,
+    ModelFactory,
+    VisionError,
+    VisionResult,
+    YoloDetector,
+    create_yolo_detector,
+    detect_frame,
+    infer_frame,
+)
 
 __version__ = "0.1.0"
 
@@ -59,4 +71,14 @@ __all__ = [
     "EventSecurityReason",
     "EventSecurityRejection",
     "ReplayFreshnessPolicy",
+    "DetectorBackend",
+    "LocalYOLODetector",
+    "LocalYoloDetector",
+    "ModelFactory",
+    "VisionError",
+    "VisionResult",
+    "YoloDetector",
+    "create_yolo_detector",
+    "detect_frame",
+    "infer_frame",
 ]

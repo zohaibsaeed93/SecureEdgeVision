@@ -56,7 +56,7 @@ src = ["apps", "secureedge", "tests"]
 select = ["E", "F", "I", "UP", "B"]
 
 [tool.mypy]
-python_version = "3.11"
+# CI runs mypy under both supported interpreters; use each job's active version.
 files = ["apps", "secureedge"]
 check_untyped_defs = true
 disallow_incomplete_defs = true
