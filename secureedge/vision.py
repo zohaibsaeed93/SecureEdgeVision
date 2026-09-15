@@ -153,12 +153,18 @@ class LocalYoloDetector:
         try:
             return runner(
                 frame,
-                device=self._settings.device,
+                device=_ultralytics_device(self._settings.device),
                 imgsz=self._settings.image_size,
                 conf=self._settings.confidence,
             )
         except Exception as exc:
             raise VisionError("local YOLO inference failed") from exc
+
+
+def _ultralytics_device(configured_device: str) -> str:
+    """Translate the config sentinel to Ultralytics' automatic selector."""
+
+    return "" if configured_device == "auto" else configured_device
 
 
 YoloDetector = LocalYoloDetector
@@ -512,15 +518,3 @@ def _optional_attr(target: Any, attribute: str) -> Any:
         raise VisionError("YOLO output could not be inspected") from exc
 
 
-__all__ = [
-    "DetectorBackend",
-    "LocalYOLODetector",
-    "LocalYoloDetector",
-    "ModelFactory",
-    "VisionError",
-    "VisionResult",
-    "YoloDetector",
-    "create_yolo_detector",
-    "detect_frame",
-    "infer_frame",
-]

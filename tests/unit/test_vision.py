@@ -59,10 +59,10 @@ class FakeModel:
         return self.results
 
 
-def _settings() -> VisionSettings:
+def _settings(*, device: str = "cpu") -> VisionSettings:
     return VisionSettings(
         model="yolo26n.pt",
-        device="cpu",
+        device=device,
         image_size=640,
         confidence=0.25,
         frame_sample_fps=2.0,
@@ -89,14 +89,28 @@ def _detector(
     names: Any = None,
     mutate: bool = False,
     failure: Exception | None = None,
+    device: str = "cpu",
 ) -> tuple[LocalYoloDetector, FakeModel]:
     model = FakeModel([_result(boxes=boxes, names=names)], mutate=mutate, failure=failure)
     detector = LocalYoloDetector(
-        _settings(),
+        _settings(device=device),
         model=model,
         weights_path=_weights(tmp_path),
     )
     return detector, model
+
+
+def test_auto_device_uses_ultralytics_default_selector(tmp_path: Path) -> None:
+    detector, model = _detector(
+        tmp_path,
+        FakeBoxes(xyxy=[[1.0, 1.0, 4.0, 4.0]], conf=[0.9], cls=[0]),
+        device="auto",
+    )
+
+    detector.infer(np.zeros((8, 8, 3), dtype=np.uint8))
+
+    assert model.calls[0][1] == {"device": "", "imgsz": 640, "conf": 0.25}
+    assert model.calls[0][1]["device"] != "auto"
 
 
 def test_infers_normalized_metadata_with_exact_configured_arguments(tmp_path: Path) -> None:
