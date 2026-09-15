@@ -44,6 +44,20 @@ from secureedge.vision import (
     detect_frame,
     infer_frame,
 )
+from secureedge.worker import (
+    CaptureBackend,
+    CapturedFrame,
+    CaptureFactory,
+    EventSink,
+    FrameDetector,
+    FrameSource,
+    IdentifierFactory,
+    MonotonicClock,
+    OpenCvFrameSource,
+    PrivacyWorkerPipeline,
+    UtcClock,
+    WorkerPipelineError,
+)
 
 __version__ = "0.1.0"
 
@@ -81,4 +95,16 @@ __all__ = [
     "create_yolo_detector",
     "detect_frame",
     "infer_frame",
+    "CapturedFrame",
+    "CaptureBackend",
+    "CaptureFactory",
+    "EventSink",
+    "FrameDetector",
+    "FrameSource",
+    "IdentifierFactory",
+    "MonotonicClock",
+    "OpenCvFrameSource",
+    "PrivacyWorkerPipeline",
+    "UtcClock",
+    "WorkerPipelineError",
 ]
