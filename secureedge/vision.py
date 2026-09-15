@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import importlib
 import math
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -285,7 +286,7 @@ def _sha256_file(path: Path) -> str:
 
 def _validate_frame(frame: Any) -> tuple[int, int]:
     try:
-        import numpy as np
+        np: Any = importlib.import_module("numpy")
     except Exception as exc:
         raise VisionError("OpenCV frame support is unavailable") from exc
 
