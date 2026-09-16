@@ -23,6 +23,27 @@ Node identity, camera identity, database URLs, and logging settings are separate
 application concerns. Private keys and credentials are never system-setting
 overrides and must not be committed.
 
+## Local worker inputs
+
+The local unsigned worker adapter requires four explicit application inputs:
+
+- `SEV_CONFIG_PATH` or `--config` for the validated system YAML;
+- `SEV_NODE_ID` or `--node-id` for the event node identity;
+- `SEV_CAMERA_ID` or `--camera-id` for the event camera identity; and
+- `SEV_MEDIA_SOURCE` or `--source` as a local path or
+  `camera:<non-negative-index>`.
+
+CLI values take precedence over their environment counterparts. Network/URI media
+sources are rejected. `--max-events <positive-int>` is an optional explicit bound
+for a local smoke/demo run. A finite local file exits cleanly at EOF; local camera
+read failure is an error. The command emits one unsigned metadata-only
+`DetectionEvent` JSON object per line. It accepts no private-key input and performs
+no signing, HTTP transport, registration, or heartbeat in this task.
+
+Frame sampling comes only from validated `vision.frame_sample_fps`. Node and camera
+IDs are validated against the existing safe wire-identifier rules; they are not
+secret configuration and are not silently defaulted by the worker adapter.
+
 ## Replay and timestamp settings
 
 `security.max_clock_skew_seconds` defines an inclusive past/future UTC window for

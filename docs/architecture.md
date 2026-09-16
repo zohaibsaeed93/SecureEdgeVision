@@ -32,4 +32,33 @@ The configured model is `yolo26n.pt`. A first use may require the configured wei
 
 Detector XYXY coordinates are clipped to the original input width and height before division by those original dimensions. The public result contains only normalized boxes, class labels, confidence, and optional track IDs. Raw frames and crops remain transient inside the worker process and are not part of the metadata boundary.
 
-The current foundation only establishes package and service boundaries. The Build Queue tracks which later Milestone 1 deliverables are implemented.
+## Privacy worker pipeline
+
+`PrivacyWorkerPipeline` composes the local detector with the strict
+`DetectionEvent` contract. An explicit `OpenCvFrameSource` opens either a local
+filesystem image/video or a local camera device; URI/network sources are rejected.
+The source is context managed and is released after finite-media EOF, a configured
+event bound, interruption, or failure. Finite media uses its declared FPS as a
+content timeline when available; cameras and media without usable FPS metadata use
+monotonic read-completion time. The configured `vision.frame_sample_fps` is the
+only sampling cadence.
+
+Frame sequences start at zero for a worker pipeline instance and increase only
+after a complete event validates. Skipped and failed frames do not consume a
+sequence number. Event IDs and nonces are independently generated safe identifiers,
+and process-local reuse fails closed. Each event has an aware UTC timestamp,
+`job_id: null`, and `mode: privacy`.
+
+Performance fields are deliberately bounded by observable components:
+`decode_ms` measures one local capture/decode call; `inference_ms` covers the
+integrated detector call, including its normalization; and `postprocess_ms` covers
+worker timestamp/identifier and event-input preparation before final Pydantic
+validation. The pipeline does not invent a finer split than the detector exposes.
+
+The current worker command can emit these **unsigned** metadata events as JSON
+Lines for local inspection. It does not load a private key, sign, contact the
+aggregator, register a node, or send a heartbeat. Signed transport is the next
+separate Milestone 1 boundary. Raw frames remain transient between the local source
+and local detector and never enter event output, logs, persistence, or transport.
+Detector output is not semantic truth; later signatures establish origin and byte
+integrity only.
