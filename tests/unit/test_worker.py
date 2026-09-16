@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import importlib
-import json
 import os
 import pathlib
 import socket
@@ -17,7 +16,14 @@ import numpy as np
 import pytest
 from apps.worker.main import run_cli
 from secureedge.config import VisionSettings
-from secureedge.contracts import Detection, FrameMetadata, ModelMetadata
+from secureedge.contracts import (
+    Detection,
+    DetectionEvent,
+    FrameMetadata,
+    ModelMetadata,
+    NodeHeartbeat,
+)
+from secureedge.crypto import encode_public_key, generate_private_key, serialize_private_key
 from secureedge.vision import VisionError, VisionResult
 from secureedge.worker import (
     CapturedFrame,
@@ -285,6 +291,64 @@ def test_sampling_uses_configured_rate_and_releases_source() -> None:
     assert source.released is True
 
 
+def test_runtime_lifecycle_starts_after_source_and_stops_before_release() -> None:
+    order: list[str] = []
+
+    class OrderedSource(FakeSource):
+        def __enter__(self) -> OrderedSource:
+            order.append("source-enter")
+            return super().__enter__()
+
+        def __exit__(self, *_args: object) -> bool:
+            order.append("source-exit")
+            return super().__exit__(*_args)
+
+    class OrderedLifecycle:
+        def __enter__(self) -> OrderedLifecycle:
+            order.append("lifecycle-enter")
+            return self
+
+        def __exit__(self, *_args: object) -> bool:
+            order.append("lifecycle-exit")
+            return False
+
+        def check(self) -> None:
+            order.append("lifecycle-check")
+
+    source = OrderedSource([None])
+    count = _pipeline(FakeDetector()).run(
+        source,
+        lambda _event: None,
+        lifecycle=OrderedLifecycle(),
+    )
+
+    assert count == 0
+    assert order[0:2] == ["source-enter", "lifecycle-enter"]
+    assert order[-2:] == ["lifecycle-exit", "source-exit"]
+    assert "lifecycle-check" in order
+
+
+def test_runtime_lifecycle_failure_releases_source() -> None:
+    class FailingLifecycle:
+        def __enter__(self) -> FailingLifecycle:
+            return self
+
+        def __exit__(self, *_args: object) -> bool:
+            return False
+
+        def check(self) -> None:
+            raise WorkerPipelineError("heartbeat activity failed")
+
+    source = FakeSource([_captured(0.0)])
+    with pytest.raises(WorkerPipelineError, match="heartbeat activity failed"):
+        _pipeline(FakeDetector()).run(
+            source,
+            lambda _event: None,
+            lifecycle=FailingLifecycle(),
+        )
+    assert source.released is True
+
+
 def test_backwards_sample_time_and_source_failure_release_resources() -> None:
     backwards = FakeSource([_captured(1.0), _captured(0.9)])
     pipeline = _pipeline(FakeDetector())
@@ -486,6 +550,9 @@ vision:
   image_size: 640
   confidence: 0.25
   frame_sample_fps: 2
+transport:
+  request_timeout_seconds: 5
+  heartbeat_interval_seconds: 10
 consensus:
   policy: trust_weighted
   iou_threshold: 0.5
@@ -497,16 +564,71 @@ consensus:
     )
 
 
-def test_cli_emits_only_unsigned_metadata_json_lines(tmp_path: Path) -> None:
+class FakeEventTransport:
+    def __init__(self) -> None:
+        self.events: list[DetectionEvent] = []
+        self.heartbeats: list[NodeHeartbeat] = []
+        self.entered = False
+        self.closed = False
+
+    def __enter__(self) -> FakeEventTransport:
+        self.entered = True
+        return self
+
+    def __exit__(self, *_args: object) -> bool:
+        self.closed = True
+        return False
+
+    def send_detection(self, event: DetectionEvent) -> None:
+        self.events.append(event)
+
+    def send_heartbeat(self, heartbeat: NodeHeartbeat) -> None:
+        self.heartbeats.append(heartbeat)
+
+
+class FakeHeartbeatLifecycle:
+    def __init__(self, transport: FakeEventTransport, node_id: str) -> None:
+        self.transport = transport
+        self.node_id = node_id
+        self.started = False
+        self.failed = False
+
+    def __enter__(self) -> FakeHeartbeatLifecycle:
+        self.started = True
+        self.transport.send_heartbeat(
+            NodeHeartbeat(
+                node_id=self.node_id,
+                timestamp_utc=datetime(2026, 9, 16, 6, 0, tzinfo=UTC),
+                status="healthy",
+            )
+        )
+        return self
+
+    def __exit__(self, *_args: object) -> bool:
+        return False
+
+    def check(self) -> None:
+        return None
+
+    def best_effort_degraded(self) -> None:
+        return None
+
+
+def test_cli_wires_signed_transport_without_unsigned_output(tmp_path: Path) -> None:
     config = tmp_path / "system.yaml"
     _write_config(config)
+    private_key = generate_private_key()
+    key_path = tmp_path / "edge-1.key"
+    key_path.write_bytes(serialize_private_key(private_key))
     output = StringIO()
     errors = StringIO()
     received_sources: list[int | str | Path] = []
+    source = FakeSource([_captured(0.0), None])
+    transport = FakeEventTransport()
 
     def source_factory(value: int | str | Path) -> FakeSource:
         received_sources.append(value)
-        return FakeSource([_captured(0.0), None])
+        return source
 
     code = run_cli(
         [
@@ -518,6 +640,8 @@ def test_cli_emits_only_unsigned_metadata_json_lines(tmp_path: Path) -> None:
             "cam-1",
             "--source",
             "camera:0",
+            "--private-key",
+            str(key_path),
             "--max-events",
             "1",
         ],
@@ -526,23 +650,36 @@ def test_cli_emits_only_unsigned_metadata_json_lines(tmp_path: Path) -> None:
         stderr=errors,
         detector_factory=lambda _settings: FakeDetector(),
         source_factory=source_factory,
+        transport_factory=lambda _settings, loaded_key: (
+            transport
+            if encode_public_key(loaded_key.public_key())
+            == encode_public_key(private_key.public_key())
+            else pytest.fail("worker loaded the wrong private key")
+        ),
+        heartbeat_factory=lambda active_transport, node_id, _interval: FakeHeartbeatLifecycle(
+            active_transport,  # type: ignore[arg-type]
+            node_id,
+        ),  # type: ignore[arg-type]
     )
 
-    payload = json.loads(output.getvalue())
     assert code == 0
     assert errors.getvalue() == ""
+    assert output.getvalue() == ""
     assert received_sources == [0]
-    assert payload["node_id"] == "edge-1"
-    assert payload["camera_id"] == "cam-1"
-    assert payload["mode"] == "privacy"
-    assert payload["job_id"] is None
-    assert "signature_b64" not in payload
-    assert "image" not in payload
+    assert source.released is True
+    assert transport.entered is True
+    assert transport.closed is True
+    assert len(transport.events) == 1
+    assert transport.events[0].node_id == "edge-1"
+    assert transport.events[0].camera_id == "cam-1"
+    assert [item.status for item in transport.heartbeats] == ["healthy"]
 
 
 def test_cli_failure_is_nonzero_and_does_not_echo_underlying_error(tmp_path: Path) -> None:
     config = tmp_path / "system.yaml"
     _write_config(config)
+    key_path = tmp_path / "edge-1.key"
+    key_path.write_bytes(serialize_private_key(generate_private_key()))
     errors = StringIO()
 
     def fail(_settings: VisionSettings) -> FakeDetector:
@@ -558,6 +695,8 @@ def test_cli_failure_is_nonzero_and_does_not_echo_underlying_error(tmp_path: Pat
             "cam-1",
             "--source",
             str(tmp_path / "local.mp4"),
+            "--private-key",
+            str(key_path),
         ],
         environ={},
         stdout=StringIO(),
@@ -567,6 +706,41 @@ def test_cli_failure_is_nonzero_and_does_not_echo_underlying_error(tmp_path: Pat
 
     assert code == 2
     assert "private source details" not in errors.getvalue()
+    assert "stopped safely" in errors.getvalue()
+
+
+def test_cli_rejects_private_key_before_detector_or_source_side_effects(
+    tmp_path: Path,
+) -> None:
+    config = tmp_path / "system.yaml"
+    _write_config(config)
+    invalid_key = tmp_path / "invalid.key"
+    invalid_key.write_text("not private key material", encoding="utf-8")
+    calls: list[str] = []
+    errors = StringIO()
+
+    code = run_cli(
+        [
+            "--config",
+            str(config),
+            "--node-id",
+            "edge-1",
+            "--camera-id",
+            "cam-1",
+            "--source",
+            "camera:0",
+            "--private-key",
+            str(invalid_key),
+        ],
+        environ={},
+        stderr=errors,
+        detector_factory=lambda _settings: calls.append("detector"),  # type: ignore[arg-type,return-value]
+        source_factory=lambda _source: calls.append("source"),  # type: ignore[arg-type,return-value]
+    )
+
+    assert code == 2
+    assert calls == []
+    assert "private key material" not in errors.getvalue()
     assert "stopped safely" in errors.getvalue()
 
 

@@ -13,6 +13,10 @@ vision:
   confidence: 0.25
   frame_sample_fps: 2
 
+transport:
+  request_timeout_seconds: 5
+  heartbeat_interval_seconds: 10
+
 # These values are reserved for the future replicated benchmark mode. They are
 # kept explicit here so later experiments do not hide thresholds in code.
 consensus:

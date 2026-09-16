@@ -12,6 +12,20 @@ The Milestone 1 aggregator will expose a typed FastAPI surface. Planned endpoint
 
 The specified response policy is: accepted event `202`; unknown node or invalid signature `401`; replay or stale timestamp `409`; schema validation failure `422`; and oversized request `413`. The service implementation and integration tests are queued as later coherent Milestone 1 deliverables.
 
+## Current worker request behavior
+
+The worker targets the configured aggregator origin with fixed
+`POST /v1/events/detections` and `POST /v1/nodes/heartbeat` paths. A detection
+request contains exactly one `SignedDetectionEnvelope`; the heartbeat request
+contains exactly one `NodeHeartbeat`. Both currently require HTTP 202. Redirects
+are not followed, response bodies are never surfaced in worker errors, and an event
+gets at most one automatic attempt so an ambiguous lost response cannot cause a
+silent duplicate retry.
+
+The heartbeat wire model remains unsigned. The worker transport does not implement
+registration, registry lookup, ingest verification, replay enforcement,
+persistence, or any server route; those are later Milestone 1 boundaries.
+
 ## Milestone 1 wire contracts
 
 All request models reject unknown fields and unsafe type coercion. Identifiers are

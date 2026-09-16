@@ -68,6 +68,24 @@ class FrameSource(Protocol):
         """Return a local frame or ``None`` for a clean finite-source EOF."""
 
 
+class WorkerLifecycle(Protocol):
+    """Optional runtime activity coupled to an opened local frame source."""
+
+    def __enter__(self) -> Self:
+        """Start activity only after the local source opened successfully."""
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> Literal[False]:
+        """Stop activity without suppressing a worker failure."""
+
+    def check(self) -> None:
+        """Raise when background activity has failed."""
+
+
 class CaptureBackend(Protocol):
     """Small subset of ``cv2.VideoCapture`` used by the local adapter."""
 
@@ -395,6 +413,7 @@ class PrivacyWorkerPipeline:
         sink: EventSink,
         *,
         max_events: int | None = None,
+        lifecycle: WorkerLifecycle | None = None,
     ) -> int:
         """Process one explicit local source and send only events to ``sink``."""
 
@@ -407,25 +426,47 @@ class PrivacyWorkerPipeline:
 
         sampler = _SamplingGate(self._settings.frame_sample_fps)
         emitted = 0
+        active_lifecycle: WorkerLifecycle = lifecycle or _NullWorkerLifecycle()
         try:
-            with source as active_source:
+            with source as active_source, active_lifecycle:
+                active_lifecycle.check()
                 while max_events is None or emitted < max_events:
+                    active_lifecycle.check()
                     captured = active_source.read()
+                    active_lifecycle.check()
                     if captured is None:
                         break
                     if not sampler.accept(captured.sample_time_seconds):
                         continue
                     event = self.process_frame(captured)
+                    active_lifecycle.check()
                     try:
                         sink(event)
                     except Exception as exc:
                         raise WorkerPipelineError("metadata sink failed") from exc
                     emitted += 1
+                    active_lifecycle.check()
         except WorkerPipelineError:
             raise
         except Exception as exc:
             raise WorkerPipelineError("local worker pipeline failed") from exc
         return emitted
+
+
+class _NullWorkerLifecycle:
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> Literal[False]:
+        return False
+
+    def check(self) -> None:
+        return None
 
 
 class _SamplingGate:
@@ -555,5 +596,6 @@ __all__ = [
     "OpenCvFrameSource",
     "PrivacyWorkerPipeline",
     "UtcClock",
+    "WorkerLifecycle",
     "WorkerPipelineError",
 ]

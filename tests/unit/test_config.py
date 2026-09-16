@@ -29,6 +29,8 @@ def test_loads_exact_starting_values() -> None:
     assert settings.vision.image_size == 640
     assert settings.vision.confidence == 0.25
     assert settings.vision.frame_sample_fps == 2
+    assert settings.transport.request_timeout_seconds == 5
+    assert settings.transport.heartbeat_interval_seconds == 10
     assert settings.consensus.policy == "trust_weighted"
     assert settings.consensus.iou_threshold == 0.50
     assert settings.consensus.accept_threshold == 0.60
@@ -44,6 +46,8 @@ def test_applies_allowlisted_environment_overrides() -> None:
             "SEV_CONFIG__SECURITY__MAX_CLOCK_SKEW_SECONDS": "45",
             "SEV_CONFIG__VISION__CONFIDENCE": "0.4",
             "SEV_CONFIG__VISION__FRAME_SAMPLE_FPS": "3.5",
+            "SEV_CONFIG__TRANSPORT__REQUEST_TIMEOUT_SECONDS": "7.5",
+            "SEV_CONFIG__TRANSPORT__HEARTBEAT_INTERVAL_SECONDS": "15",
             "SEV_NODE_ID": "ignored-by-system-settings",
         },
     )
@@ -52,6 +56,8 @@ def test_applies_allowlisted_environment_overrides() -> None:
     assert settings.security.max_clock_skew_seconds == 45
     assert settings.vision.confidence == 0.4
     assert settings.vision.frame_sample_fps == 3.5
+    assert settings.transport.request_timeout_seconds == 7.5
+    assert settings.transport.heartbeat_interval_seconds == 15
 
 
 @pytest.mark.parametrize(
@@ -65,6 +71,16 @@ def test_applies_allowlisted_environment_overrides() -> None:
         ("SEV_CONFIG__VISION__IMAGE_SIZE", "8", "vision.image_size"),
         ("SEV_CONFIG__VISION__CONFIDENCE", "1.1", "vision.confidence"),
         ("SEV_CONFIG__VISION__FRAME_SAMPLE_FPS", "0", "vision.frame_sample_fps"),
+        (
+            "SEV_CONFIG__TRANSPORT__REQUEST_TIMEOUT_SECONDS",
+            "0",
+            "transport.request_timeout_seconds",
+        ),
+        (
+            "SEV_CONFIG__TRANSPORT__HEARTBEAT_INTERVAL_SECONDS",
+            "3601",
+            "transport.heartbeat_interval_seconds",
+        ),
         ("SEV_CONFIG__CONSENSUS__IOU_THRESHOLD", "-0.1", "consensus.iou_threshold"),
         ("SEV_CONFIG__CONSENSUS__ALPHA", "1.1", "consensus.alpha"),
     ],
@@ -90,6 +106,18 @@ def test_rejects_url_credentials_and_unknown_yaml_fields(tmp_path: Path) -> None
     )
     with pytest.raises(ConfigurationError, match="aggregator_url.*credentials"):
         load_settings(credentialed)
+
+    for unsafe_url in (
+        "http://aggregator:8000/base",
+        "http://aggregator:8000?token=value",
+        "http://aggregator:8000#fragment",
+    ):
+        unsafe = _write_config(
+            tmp_path,
+            content.replace("http://aggregator:8000", unsafe_url),
+        )
+        with pytest.raises(ConfigurationError, match="aggregator_url"):
+            load_settings(unsafe)
 
     extra = _write_config(tmp_path, content + "\nprivate_key: forbidden\n")
     with pytest.raises(ConfigurationError, match="private_key.*Extra inputs"):

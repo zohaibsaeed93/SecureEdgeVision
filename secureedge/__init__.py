@@ -32,6 +32,19 @@ from secureedge.security import (
     EventSecurityRejection,
     ReplayFreshnessPolicy,
 )
+from secureedge.transport import (
+    ACCEPTED_STATUS,
+    DETECTION_PATH,
+    HEARTBEAT_PATH,
+    EventTransport,
+    HeartbeatError,
+    HeartbeatFactory,
+    SignedWorkerRunner,
+    SignedWorkerTransport,
+    TransportError,
+    WaitFunction,
+    WorkerHeartbeatLifecycle,
+)
 from secureedge.vision import (
     DetectorBackend,
     LocalYOLODetector,
@@ -56,6 +69,7 @@ from secureedge.worker import (
     OpenCvFrameSource,
     PrivacyWorkerPipeline,
     UtcClock,
+    WorkerLifecycle,
     WorkerPipelineError,
 )
 
@@ -85,6 +99,17 @@ __all__ = [
     "EventSecurityReason",
     "EventSecurityRejection",
     "ReplayFreshnessPolicy",
+    "ACCEPTED_STATUS",
+    "DETECTION_PATH",
+    "HEARTBEAT_PATH",
+    "EventTransport",
+    "HeartbeatError",
+    "HeartbeatFactory",
+    "SignedWorkerRunner",
+    "SignedWorkerTransport",
+    "TransportError",
+    "WaitFunction",
+    "WorkerHeartbeatLifecycle",
     "DetectorBackend",
     "LocalYOLODetector",
     "LocalYoloDetector",
@@ -106,5 +131,6 @@ __all__ = [
     "OpenCvFrameSource",
     "PrivacyWorkerPipeline",
     "UtcClock",
+    "WorkerLifecycle",
     "WorkerPipelineError",
 ]

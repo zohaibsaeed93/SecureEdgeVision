@@ -55,10 +55,18 @@ integrated detector call, including its normalization; and `postprocess_ms` cove
 worker timestamp/identifier and event-input preparation before final Pydantic
 validation. The pipeline does not invent a finer split than the detector exposes.
 
-The current worker command can emit these **unsigned** metadata events as JSON
-Lines for local inspection. It does not load a private key, sign, contact the
-aggregator, register a node, or send a heartbeat. Signed transport is the next
-separate Milestone 1 boundary. Raw frames remain transient between the local source
-and local detector and never enter event output, logs, persistence, or transport.
-Detector output is not semantic truth; later signatures establish origin and byte
-integrity only.
+The worker loads an Ed25519 private key only from an explicit local path, signs each
+validated event with the integrated canonical signing primitive, and makes one
+HTTPX request to `POST /v1/events/detections`. It also sends the existing strict
+metadata-only heartbeat to `POST /v1/nodes/heartbeat` initially and at the
+configured interval while the source is active. The source-coupled lifecycle stops
+the heartbeat and releases HTTP/OpenCV resources on EOF or failure. Raw frames
+remain transient between the local source and detector and never enter an event,
+request, log, or fallback output.
+
+The worker follows no redirects and automatically retries neither request. A lost
+response is therefore reported as an ambiguous failed delivery, not fabricated
+success. Heartbeats are not signed in the current wire contract, HTTP is suitable
+only for the local demo, and node registration/aggregator verification remain later
+Milestone 1 boundaries. Event signatures establish origin and byte integrity only,
+not detector truth.

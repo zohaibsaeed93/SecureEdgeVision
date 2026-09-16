@@ -30,3 +30,15 @@ The policy also rejects wall-clock rollback behind its latest accepted instant, 
 a forward jump cannot prune identifiers and a later backward jump reopen them.
 Distributed or durable replay prevention belongs to later architecture work and is
 not claimed here.
+
+The current worker signs only canonical `DetectionEvent` bytes and sends only the
+strict signed envelope. Private-key paths and bytes, raw frames, crops, tensors, and
+model bytes are excluded from requests and sanitized failures. Delivery has a
+configured timeout, follows no redirect, and makes one attempt; a lost response is
+an explicit ambiguous failure rather than a retry or success.
+
+The current heartbeat contract is intentionally unsigned and therefore does not
+provide event-style authenticity. Plain HTTP is acceptable only inside the local
+Compose demo. Production TLS, authenticated heartbeats, durable delivery,
+key rotation/revocation, and server-side node enforcement remain documented
+limitations rather than claims of this task.

@@ -21,6 +21,8 @@ ImageSize = Annotated[int, Field(ge=32, le=4_096)]
 Probability = Annotated[float, Field(ge=0.0, le=1.0)]
 PositiveProbability = Annotated[float, Field(gt=0.0, le=1.0)]
 SampleFps = Annotated[float, Field(gt=0.0, le=120.0)]
+RequestTimeoutSeconds = Annotated[float, Field(gt=0.0, le=120.0)]
+HeartbeatIntervalSeconds = Annotated[float, Field(gt=0.0, le=3_600.0)]
 
 
 class StrictSettingsModel(BaseModel):
@@ -59,6 +61,13 @@ class VisionSettings(StrictSettingsModel):
         return candidate
 
 
+class TransportSettings(StrictSettingsModel):
+    """Bounded worker-to-aggregator transport behavior."""
+
+    request_timeout_seconds: RequestTimeoutSeconds
+    heartbeat_interval_seconds: HeartbeatIntervalSeconds
+
+
 class ConsensusSettings(StrictSettingsModel):
     """Future-only consensus values; no consensus behavior is implemented here."""
 
@@ -74,6 +83,7 @@ class SystemSettings(StrictSettingsModel):
     aggregator_url: AnyHttpUrl
     security: SecuritySettings
     vision: VisionSettings
+    transport: TransportSettings
     consensus: ConsensusSettings
 
     @field_validator("aggregator_url")
@@ -81,6 +91,10 @@ class SystemSettings(StrictSettingsModel):
     def reject_url_credentials(cls, value: AnyHttpUrl) -> AnyHttpUrl:
         if value.username is not None or value.password is not None:
             raise ValueError("must not contain credentials")
+        if value.query is not None or value.fragment is not None:
+            raise ValueError("must not contain a query or fragment")
+        if value.path not in (None, "", "/"):
+            raise ValueError("must identify an origin without a path")
         return value
 
 
@@ -99,6 +113,14 @@ _ENV_OVERRIDES: dict[str, _Override] = {
     "SEV_CONFIG__VISION__IMAGE_SIZE": (("vision", "image_size"), int),
     "SEV_CONFIG__VISION__CONFIDENCE": (("vision", "confidence"), float),
     "SEV_CONFIG__VISION__FRAME_SAMPLE_FPS": (("vision", "frame_sample_fps"), float),
+    "SEV_CONFIG__TRANSPORT__REQUEST_TIMEOUT_SECONDS": (
+        ("transport", "request_timeout_seconds"),
+        float,
+    ),
+    "SEV_CONFIG__TRANSPORT__HEARTBEAT_INTERVAL_SECONDS": (
+        ("transport", "heartbeat_interval_seconds"),
+        float,
+    ),
     "SEV_CONFIG__CONSENSUS__POLICY": (("consensus", "policy"), str),
     "SEV_CONFIG__CONSENSUS__IOU_THRESHOLD": (("consensus", "iou_threshold"), float),
     "SEV_CONFIG__CONSENSUS__ACCEPT_THRESHOLD": (
