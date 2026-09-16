@@ -5,10 +5,11 @@ must call `secureedge.config.load_settings(path, environ)` during startup; impor
 the module does not read files, inspect the process environment, load a model, or
 contact another service.
 
-The loader validates privacy mode, the HTTP(S) aggregator URL, replay/freshness and
-request-size limits, YOLO nano vision settings, and the reserved future consensus
-values. Consensus values are configuration only in Milestone 1 and enable no
-consensus or trust behavior.
+The loader validates privacy mode, a credential-free HTTP(S) aggregator origin,
+replay/freshness and request-size limits, YOLO nano vision settings, bounded
+transport request timeout and heartbeat interval, and the reserved future
+consensus values. Consensus values are configuration only in Milestone 1 and
+enable no consensus or trust behavior.
 
 ## Environment overrides
 
@@ -25,24 +26,31 @@ overrides and must not be committed.
 
 ## Local worker inputs
 
-The local unsigned worker adapter requires four explicit application inputs:
+The signed worker adapter requires five explicit application inputs:
 
 - `SEV_CONFIG_PATH` or `--config` for the validated system YAML;
 - `SEV_NODE_ID` or `--node-id` for the event node identity;
 - `SEV_CAMERA_ID` or `--camera-id` for the event camera identity; and
 - `SEV_MEDIA_SOURCE` or `--source` as a local path or
-  `camera:<non-negative-index>`.
+  `camera:<non-negative-index>`; and
+- `SEV_PRIVATE_KEY_PATH` or `--private-key` as a local unencrypted PKCS#8
+  Ed25519 private-key path.
 
 CLI values take precedence over their environment counterparts. Network/URI media
 sources are rejected. `--max-events <positive-int>` is an optional explicit bound
 for a local smoke/demo run. A finite local file exits cleanly at EOF; local camera
-read failure is an error. The command emits one unsigned metadata-only
-`DetectionEvent` JSON object per line. It accepts no private-key input and performs
-no signing, HTTP transport, registration, or heartbeat in this task.
+read failure is an error. After configuration, key, detector, source, and transport
+setup succeed, the command sends an initial healthy heartbeat and then continues at
+`transport.heartbeat_interval_seconds`. Each sampled `DetectionEvent` is signed
+and delivered once; only HTTP 202 is success. Redirects, timeouts, network errors,
+and other statuses fail closed. `transport.request_timeout_seconds` bounds each
+request. The command emits no event, signature, key, or unsigned fallback to stdout.
 
 Frame sampling comes only from validated `vision.frame_sample_fps`. Node and camera
 IDs are validated against the existing safe wire-identifier rules; they are not
 secret configuration and are not silently defaulted by the worker adapter.
+Private-key bytes are deliberately outside `SystemSettings` and all
+`SEV_CONFIG__...` overrides.
 
 ## Replay and timestamp settings
 

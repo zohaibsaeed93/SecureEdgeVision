@@ -11,9 +11,9 @@ Replicated Byzantine benchmark mode is a separate future research path for publi
 Milestone 1 is being delivered in reviewed coherent boundaries. The repository now
 contains strict detection/node contracts, deterministic canonicalization, Ed25519
 primitives, process-local replay/freshness policy, normalized local YOLO inference,
-and a local privacy-worker pipeline that produces unsigned metadata-only
-`DetectionEvent` JSON Lines. Signed worker transport, aggregator persistence/API,
-dashboard behavior, and the end-to-end demo remain later Milestone 1 tasks.
+the local privacy-worker pipeline, and one-attempt signed metadata transport with
+periodic metadata-only heartbeats. Aggregator persistence/API, dashboard behavior,
+and the end-to-end demo remain later Milestone 1 tasks.
 
 Milestone 1 is the supervisor-demo vertical slice: local YOLO inference, normalized `DetectionEvent` creation, Ed25519 signing, freshness/replay protection, signed metadata transport, FastAPI aggregation, SQLite persistence, security alerts, health/query APIs, a basic dashboard, tests, CI, and demo documentation. Milestones 2–4 remain future work and are not implemented here.
 
@@ -62,12 +62,12 @@ make experiment ...# future Milestone 3 command
 make verify-runs   # future artifact validation command
 ```
 
-Run `uv sync` (or `make bootstrap`) before the test and lint commands. The worker's
-current local-only adapter requires explicit config, node, camera, and local source
-inputs as documented in `docs/configuration.md`; its JSON Lines output is unsigned
-and is not yet transported. Other application services remain incremental. The
-privacy-mode workflow is not claimed complete until the Build Queue acceptance
-criteria are satisfied.
+Run `uv sync` (or `make bootstrap`) before the test and lint commands. The worker
+requires explicit config, node, camera, local source, and local Ed25519 private-key
+path inputs as documented in `docs/configuration.md`. It signs and sends only the
+strict event envelope and metadata-only heartbeat; it emits no unsigned success
+fallback. Other application services remain incremental, and the privacy-mode
+workflow is not complete until the Build Queue acceptance criteria are satisfied.
 
 `make keys NODE_ID=edge-1` writes an unencrypted PKCS#8 PEM private key and a
 canonical base64 raw public key under the ignored `secrets/` directory. The

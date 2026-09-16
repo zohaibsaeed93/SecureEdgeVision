@@ -110,7 +110,15 @@ def verify_detection_envelope(
 ) -> bool:
     """Verify a signed event body, returning false for an invalid signature."""
 
-    if not isinstance(envelope, SignedDetectionEnvelope):
+    envelope_type = type(envelope)
+    envelope_model = SignedDetectionEnvelope
+    if not (
+        isinstance(envelope, envelope_model)
+        or (
+            envelope_type.__module__ == envelope_model.__module__
+            and envelope_type.__qualname__ == envelope_model.__qualname__
+        )
+    ):
         raise KeyMaterialError("envelope must be a signed detection envelope")
     if not isinstance(public_key, Ed25519PublicKey):
         raise KeyMaterialError("public key must be an Ed25519 public key")
