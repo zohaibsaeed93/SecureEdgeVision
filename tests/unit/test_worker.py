@@ -439,6 +439,28 @@ def test_opencv_source_distinguishes_early_eof_and_camera_failure(tmp_path: Path
     assert closed_capture.release_count == 1
 
 
+def test_opencv_source_releases_capture_when_open_validation_raises() -> None:
+    class FailingOpenCapture(FakeCapture):
+        def isOpened(self) -> bool:
+            raise RuntimeError("sensitive backend source detail")
+
+    capture = FailingOpenCapture([])
+    source = OpenCvFrameSource(
+        0,
+        capture_factory=lambda _source: capture,
+        monotonic_clock=StepClock(),
+    )
+
+    with pytest.raises(WorkerPipelineError) as error:
+        with source:
+            pass
+
+    assert str(error.value) == "local frame source could not be opened"
+    assert "sensitive" not in str(error.value)
+    assert isinstance(error.value.__cause__, RuntimeError)
+    assert capture.release_count == 1
+
+
 def test_opencv_source_rejects_remote_sources_and_has_no_constructor_io() -> None:
     calls: list[int | str] = []
     with pytest.raises(WorkerPipelineError, match="local media source"):

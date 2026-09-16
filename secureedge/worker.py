@@ -168,8 +168,12 @@ class OpenCvFrameSource:
 
         try:
             capture = factory(source_argument)
+        except Exception as exc:
+            raise WorkerPipelineError("local frame source could not be opened") from exc
+        try:
             opened = bool(capture.isOpened())
         except Exception as exc:
+            _release_quietly(capture)
             raise WorkerPipelineError("local frame source could not be opened") from exc
         if not opened:
             _release_quietly(capture)
