@@ -97,10 +97,13 @@ def _content_length(request: Request, *, maximum: int) -> int | None:
         return None
     if not raw.isascii() or not raw.isdecimal():
         raise _RequestFailure(422, "invalid_request")
-    declared = int(raw)
-    if declared > maximum:
+    normalized = raw.lstrip("0") or "0"
+    maximum_decimal = str(maximum)
+    if len(normalized) > len(maximum_decimal) or (
+        len(normalized) == len(maximum_decimal) and normalized > maximum_decimal
+    ):
         raise _RequestFailure(413, "request_too_large")
-    return declared
+    return int(normalized)
 
 
 async def _read_bounded_body(request: Request, *, maximum: int) -> bytes:

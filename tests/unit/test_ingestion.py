@@ -385,6 +385,33 @@ async def test_declared_and_streamed_oversize_return_413_without_rows(
 
 
 @pytest.mark.asyncio
+async def test_pathological_content_length_is_bounded_without_large_int_conversion(
+    settings: SecuritySettings,
+    session_factory: Callable[[], Session],
+) -> None:
+    app = _app(settings, session_factory)
+    excessive_digits = await _post(app, b"{}", {"content-length": "9" * 5000})
+    leading_zero_oversize = await _post(
+        app,
+        b"{}",
+        {"content-length": ("0" * 5000) + "1025"},
+    )
+    leading_zero_match = await _post(
+        app,
+        b"{}",
+        {"content-length": ("0" * 5000) + "2"},
+    )
+
+    assert excessive_digits.status_code == 413
+    assert leading_zero_oversize.status_code == 413
+    assert leading_zero_match.status_code == 422
+    assert excessive_digits.json() == {"detail": {"code": "request_too_large"}}
+    assert leading_zero_oversize.json() == {"detail": {"code": "request_too_large"}}
+    assert leading_zero_match.json() == {"detail": {"code": "invalid_request"}}
+    assert _row_counts(session_factory) == (0, 0)
+
+
+@pytest.mark.asyncio
 async def test_bounded_reader_stops_requesting_chunks_after_limit() -> None:
     chunks = iter([b"a" * 600, b"b" * 600, b"must-not-be-read"])
     calls = 0
