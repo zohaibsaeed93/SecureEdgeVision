@@ -24,7 +24,7 @@ from secureedge.persistence import (
     seed_node_registry,
     session_scope,
 )
-from sqlalchemy import Engine, inspect, select, text, update
+from sqlalchemy import Engine, MetaData, UniqueConstraint, inspect, select, text, update
 from sqlalchemy.orm import Session, sessionmaker
 
 NOW = datetime(2026, 9, 17, 3, 15, tzinfo=UTC)
@@ -221,6 +221,50 @@ def test_initializer_rejects_same_named_but_incompatible_schema(
 
         with pytest.raises(PersistenceError, match="^database schema is incompatible$"):
             initialize_database(engine)
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize("column_name", ["event_id", "nonce"])
+def test_initializer_rejects_undeclared_replay_unique_constraint_without_modifying_schema(
+    tmp_path: pathlib.Path,
+    column_name: str,
+) -> None:
+    engine = create_sqlite_engine(f"sqlite:///{tmp_path / f'unique-{column_name}.sqlite3'}")
+    try:
+        incompatible_metadata = MetaData()
+        for table in PersistenceBase.metadata.sorted_tables:
+            table.to_metadata(incompatible_metadata)
+        incompatible_metadata.tables["detection_events"].append_constraint(
+            UniqueConstraint(column_name, name=f"uq_detection_events_{column_name}")
+        )
+        incompatible_metadata.create_all(engine)
+
+        with engine.connect() as connection:
+            schema_before = [
+                tuple(row)
+                for row in connection.execute(
+                    text(
+                        "SELECT type, name, tbl_name, sql "
+                        "FROM sqlite_master ORDER BY type, name"
+                    )
+                )
+            ]
+
+        with pytest.raises(PersistenceError, match="^database schema is incompatible$"):
+            initialize_database(engine)
+
+        with engine.connect() as connection:
+            schema_after = [
+                tuple(row)
+                for row in connection.execute(
+                    text(
+                        "SELECT type, name, tbl_name, sql "
+                        "FROM sqlite_master ORDER BY type, name"
+                    )
+                )
+            ]
+        assert schema_after == schema_before
     finally:
         engine.dispose()
 

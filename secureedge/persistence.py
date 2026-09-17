@@ -35,6 +35,7 @@ from sqlalchemy.exc import ArgumentError, SQLAlchemyError
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 from sqlalchemy.pool import StaticPool
 from sqlalchemy.sql.schema import CheckConstraint as SchemaCheckConstraint
+from sqlalchemy.sql.schema import UniqueConstraint as SchemaUniqueConstraint
 from sqlalchemy.types import TypeDecorator
 
 from secureedge.contracts import (
@@ -527,6 +528,24 @@ def _verify_schema(engine: Engine) -> None:
         )
         expected_primary_key = [column.name for column in table.primary_key.columns]
         if reflected_primary_key != expected_primary_key:
+            raise PersistenceError("database schema is incompatible")
+
+        reflected_unique_constraints = {
+            (
+                item.get("name"),
+                tuple(item.get("column_names") or ()),
+            )
+            for item in inspector.get_unique_constraints(table_name)
+        }
+        expected_unique_constraints = {
+            (
+                constraint.name,
+                tuple(column.name for column in constraint.columns),
+            )
+            for constraint in table.constraints
+            if isinstance(constraint, SchemaUniqueConstraint)
+        }
+        if reflected_unique_constraints != expected_unique_constraints:
             raise PersistenceError("database schema is incompatible")
 
         reflected_foreign_keys = {
