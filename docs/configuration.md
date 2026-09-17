@@ -48,7 +48,33 @@ public key material. Repeating the same node/key is a no-op; attempting to repla
 a node's key through seeding rejects the entire batch. Private-key paths and bytes
 never enter persistence configuration. Database event IDs and nonces are not
 permanently unique, so configured replay/freshness enforcement remains
-process-local until a separately reviewed ingestion boundary changes that design.
+process-local in the current authenticated-ingestion design.
+
+## Local aggregator inputs
+
+The aggregator command requires explicit `--config <path>` and
+`--database-url <approved-local-sqlite-url>` arguments. It does not discover a
+database URL from the environment or hide one in domain logic. Public registry
+entries may be seeded with repeated
+`--node-public-key NODE_ID=PUBLIC_KEY_B64` arguments; values pass through the
+strict `NodeRegistration` boundary and identical existing registrations are
+idempotent. Private keys are never accepted.
+
+The command initializes the schema explicitly, owns engine disposal, constructs one
+process-local replay policy from `settings.security`, and runs one Uvicorn worker.
+For example:
+
+```text
+uv run secureedgevision-aggregator \
+  --config config/system.yaml \
+  --database-url sqlite:///data/secureedgevision.sqlite3 \
+  --node-public-key edge-1=<canonical-public-key-base64>
+```
+
+The database parent directory must already exist. `security.max_request_bytes`
+bounds the actual streamed request body as well as declared length;
+`max_clock_skew_seconds` and `nonce_ttl_seconds` are used by the single app-owned
+freshness/replay policy. No route-specific threshold is hidden in code.
 
 ## Local worker inputs
 
