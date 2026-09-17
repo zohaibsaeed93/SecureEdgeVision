@@ -70,3 +70,28 @@ success. Heartbeats are not signed in the current wire contract, HTTP is suitabl
 only for the local demo, and node registration/aggregator verification remain later
 Milestone 1 boundaries. Event signatures establish origin and byte integrity only,
 not detector truth.
+
+## Aggregator persistence boundary
+
+`secureedge.persistence` defines the Milestone 1 SQLite source of truth without
+starting an aggregator service. Its single declarative metadata boundary contains
+exactly three tables: `nodes` for canonical Ed25519 public identities and minimal
+heartbeat state, `detection_events` for losslessly reconstructable privacy-mode
+metadata, and `security_alerts` for sanitized rejection-audit identifiers. Alert
+rows deliberately do not require a node foreign key so an unknown claimed node can
+be audited; accepted events do require a registered node.
+
+Detections use deterministic validated JSON because their ordered cardinality is
+variable. Every conversion back to a domain event passes through the strict
+Pydantic contracts, so malformed or non-finite stored metadata fails closed. The
+schema has no fields for pixels, crops, tensors, local media paths, model bytes,
+private keys, credentials, request bodies, signatures in alerts, or exception
+text. Event IDs and nonces are indexed but are not permanently unique: the
+configured process-local `ReplayFreshnessPolicy` remains the replay authority for
+this milestone.
+
+Engine creation, schema initialization, sessions, commits, rollbacks, and node
+seeding are explicit caller actions. Initialization is idempotent for the exact
+schema and preserves rows; it neither drops data nor pretends to migrate an
+incompatible database. Routes, signature verification, heartbeat ingestion,
+event/alert orchestration, and query APIs are intentionally outside this boundary.

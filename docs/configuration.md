@@ -24,6 +24,32 @@ Node identity, camera identity, database URLs, and logging settings are separate
 application concerns. Private keys and credentials are never system-setting
 overrides and must not be committed.
 
+## Aggregator database input
+
+Persistence code accepts a database URL only through an explicit
+`create_sqlite_engine(...)` call; it does not read `SEV_DATABASE_URL`, another
+environment variable, or a hidden default. For the local demo, an application may
+pass the existing example `sqlite:///state/secureedgevision.db`. The parent
+directory must already exist: the reusable persistence layer rejects a missing
+parent rather than creating filesystem structure implicitly. Explicit
+`sqlite:///:memory:` is supported for tests.
+
+Only credential-free local `sqlite`/`sqlite+pysqlite` URLs without query options,
+URI mode, traversal, or remote hosts are accepted. The application owns engine
+disposal and must explicitly call `initialize_database(engine)` followed by
+`create_session_factory(engine)`. Initialization creates the exact schema when the
+database is empty, is idempotent without deleting rows, and rejects partial or
+incompatible schemas; there is no implicit migration behavior. Transactional
+`session_scope(...)` commits successful units of work and rolls back and closes on
+failure.
+
+Node-registry seeding consumes validated `NodeRegistration` values containing only
+public key material. Repeating the same node/key is a no-op; attempting to replace
+a node's key through seeding rejects the entire batch. Private-key paths and bytes
+never enter persistence configuration. Database event IDs and nonces are not
+permanently unique, so configured replay/freshness enforcement remains
+process-local until a separately reviewed ingestion boundary changes that design.
+
 ## Local worker inputs
 
 The signed worker adapter requires five explicit application inputs:
