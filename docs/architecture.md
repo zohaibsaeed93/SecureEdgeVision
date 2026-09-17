@@ -93,5 +93,21 @@ this milestone.
 Engine creation, schema initialization, sessions, commits, rollbacks, and node
 seeding are explicit caller actions. Initialization is idempotent for the exact
 schema and preserves rows; it neither drops data nor pretends to migrate an
-incompatible database. Routes, signature verification, heartbeat ingestion,
-event/alert orchestration, and query APIs are intentionally outside this boundary.
+incompatible database. Heartbeat ingestion, alert persistence, and query APIs are
+intentionally outside this persistence boundary.
+
+## Authenticated detection ingestion
+
+The aggregator is created only through an explicit FastAPI factory. One caller-owned
+`ReplayFreshnessPolicy` lives for the lifetime of the app, while every request gets
+a short-lived SQLAlchemy session. The only current server route is
+`POST /v1/events/detections`; documentation/OpenAPI convenience routes are disabled
+so unimplemented surfaces are not implied.
+
+The HTTP adapter bounds streamed bytes before parsing and applies strict JSON and
+Pydantic validation. Reusable `DetectionEventIngestor` domain logic then performs
+registered-node lookup, registered-key Ed25519 verification, atomic freshness/replay
+reservation, and metadata persistence in that order. HTTP 202 is emitted only after
+commit. Failures roll back and close the request session; a replay reservation made
+before an uncertain commit failure remains until its configured TTL. The runtime
+uses a single Uvicorn worker because replay state is process-local.

@@ -40,5 +40,21 @@ an explicit ambiguous failure rather than a retry or success.
 The current heartbeat contract is intentionally unsigned and therefore does not
 provide event-style authenticity. Plain HTTP is acceptable only inside the local
 Compose demo. Production TLS, authenticated heartbeats, durable delivery,
-key rotation/revocation, and server-side node enforcement remain documented
+key rotation/revocation, and production identity lifecycle remain documented
 limitations rather than claims of this task.
+
+The current ingestion route enforces server-side public-key lookup and event
+authentication. Request size is checked against both declared and streamed bytes;
+JSON rejects duplicate keys and non-finite numbers; and strict contracts prevent
+raw-frame/image/crop/tensor/media-path fields from entering the domain boundary.
+The route verifies the registered-key signature before invoking the replay policy,
+so unknown nodes, tampered events, and malformed requests cannot consume replay
+state. Responses contain only stable reason codes and never include payloads,
+signatures, keys, SQL, paths, or lower-level exception text.
+
+Accepted metadata is acknowledged only after the SQLite commit. If persistence
+fails after replay reservation, the reservation remains until TTL because the
+durable outcome may be uncertain. This can temporarily reduce availability but
+does not silently permit replay. Rejection-alert persistence is not yet wired, so
+current rejections create no audit row; that limitation is the next Milestone 1
+boundary.

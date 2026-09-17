@@ -1,16 +1,39 @@
 # API contract
 
-The Milestone 1 aggregator will expose a typed FastAPI surface. Planned endpoints include:
+The Milestone 1 aggregator exposes one current typed FastAPI route. Other planned
+endpoints remain separate reviewed boundaries:
 
 - `GET /health` for liveness/readiness and database/node summary
-- `POST /v1/events/detections` for one signed detection envelope
+- `POST /v1/events/detections` for one signed detection envelope (**implemented**)
 - `POST /v1/nodes/heartbeat` for worker health
 - `GET /v1/nodes` for node status
 - `GET /v1/events` for recent accepted metadata
 - `GET /v1/security/alerts` for signature, freshness, replay, and later semantic alerts
 - `GET /metrics` for Prometheus counters and histograms
 
-The specified response policy is: accepted event `202`; unknown node or invalid signature `401`; replay or stale timestamp `409`; schema validation failure `422`; and oversized request `413`. The service implementation and integration tests are queued as later coherent Milestone 1 deliverables.
+The current response policy is: accepted event `202`; unknown node or invalid
+signature `401`; replay, stale, or future timestamp `409`; malformed JSON or strict
+contract failure `422`; oversized request `413`; and sanitized registry,
+configuration, or persistence failure `503`. A 202 response has an empty body and
+is returned only after the accepted metadata transaction commits.
+
+## Current authenticated ingestion behavior
+
+`POST /v1/events/detections` requires `application/json` and exactly one strict
+`SignedDetectionEnvelope`. The adapter enforces
+`security.max_request_bytes` against both a declared `Content-Length` and the bytes
+actually streamed, stopping as soon as the bound is exceeded. Missing or chunked
+length is allowed but never bypasses the streamed limit. Malformed UTF-8/JSON,
+duplicate object keys, non-finite values, incorrect length, extra/raw-frame fields,
+and wire-model violations return a stable `invalid_request` without reflecting the
+payload.
+
+Processing order is fixed: validate the bounded wire request, look up the claimed
+node in the SQLite registry, verify the signature with only that stored public key,
+apply the single app-owned freshness/replay policy, then commit a metadata-only
+`DetectionEventRecord`. Unknown nodes and invalid signatures do not mutate replay
+state. Rejections do not create accepted-event or security-alert rows; alert
+persistence is intentionally the next task.
 
 ## Current worker request behavior
 
@@ -75,8 +98,9 @@ The signed envelope is exactly
 representation of a 64-byte Ed25519 signature. This layer validates only the
 wire representation. Deterministic canonicalization and the reusable Ed25519
 signing/verification primitives are separate domain layers. The process-local
-freshness/replay policy described below is another separate domain layer; API
-wiring remains a later Milestone 1 task.
+freshness/replay policy described below is another separate domain layer. The
+authenticated ingestion route now composes these layers; other aggregator routes
+remain later Milestone 1 tasks.
 A valid signature will establish origin and byte integrity, not the semantic
 correctness of a detection.
 

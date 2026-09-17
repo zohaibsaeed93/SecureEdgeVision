@@ -14,8 +14,12 @@ primitives, process-local replay/freshness policy, normalized local YOLO inferen
 the local privacy-worker pipeline, and one-attempt signed metadata transport with
 periodic metadata-only heartbeats. It also contains the explicit SQLAlchemy/SQLite
 persistence foundation for registered public node identities, accepted detection
-metadata, and sanitized security-alert metadata. Aggregator API behavior, dashboard
-behavior, and the end-to-end demo remain later Milestone 1 tasks.
+metadata, and sanitized security-alert metadata. The aggregator now exposes the
+bounded authenticated detection-ingest route: it validates strict JSON, resolves a
+registered public key, verifies the Ed25519 signature, applies the configured
+freshness/replay policy, and commits accepted metadata before returning HTTP 202.
+Security-alert persistence, query APIs, dashboard behavior, and the end-to-end demo
+remain later Milestone 1 tasks.
 
 Milestone 1 is the supervisor-demo vertical slice: local YOLO inference, normalized `DetectionEvent` creation, Ed25519 signing, freshness/replay protection, signed metadata transport, FastAPI aggregation, SQLite persistence, security alerts, health/query APIs, a basic dashboard, tests, CI, and demo documentation. Milestones 2–4 remain future work and are not implemented here.
 
@@ -71,6 +75,20 @@ strict event envelope and metadata-only heartbeat; it emits no unsigned success
 fallback. Other application services remain incremental, and the privacy-mode
 workflow is not complete until the Build Queue acceptance criteria are satisfied.
 
+The aggregator runtime is constructed explicitly. Supply validated configuration,
+an approved local SQLite URL, and one or more public node registrations as needed:
+
+```text
+uv run secureedgevision-aggregator \
+  --config config/system.yaml \
+  --database-url sqlite:///data/secureedgevision.sqlite3 \
+  --node-public-key edge-1=<canonical-public-key-base64>
+```
+
+The command initializes the exact non-destructive schema and runs one Uvicorn
+worker. The replay policy is process-local, so multi-worker serving is deliberately
+not enabled for this demo boundary.
+
 `make keys NODE_ID=edge-1` writes an unencrypted PKCS#8 PEM private key and a
 canonical base64 raw public key under the ignored `secrets/` directory. The
 command requires a safe node ID, refuses to overwrite either target, and never
@@ -88,6 +106,10 @@ and call the non-destructive initializer. It stores only public node identity an
 validated metadata—never frames, crops, tensors, model bytes, private keys,
 credentials, or arbitrary request bodies. Replay expiry remains process-local and
 configured; database rows do not create permanent event-ID or nonce uniqueness.
+The ingestion route bounds the streamed body before JSON parsing, rejects duplicate
+JSON keys and non-finite values, authenticates before reserving replay identifiers,
+and returns only stable sanitized errors. A reservation is retained until TTL if a
+later commit outcome fails, preventing an uncertain write from reopening replay.
 
 ## Milestone roadmap
 

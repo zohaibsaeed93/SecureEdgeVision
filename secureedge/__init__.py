@@ -25,6 +25,13 @@ from secureedge.crypto import (
     sign_detection_event,
     verify_detection_envelope,
 )
+from secureedge.ingestion import (
+    DetectionEventIngestor,
+    IngestionAcceptance,
+    IngestionReason,
+    IngestionRejection,
+    IngestionServiceError,
+)
 from secureedge.persistence import (
     DetectionEventRecord,
     NodeRecord,
@@ -108,6 +115,11 @@ __all__ = [
     "serialize_private_key",
     "sign_detection_event",
     "verify_detection_envelope",
+    "DetectionEventIngestor",
+    "IngestionAcceptance",
+    "IngestionReason",
+    "IngestionRejection",
+    "IngestionServiceError",
     "DetectionEventRecord",
     "NodeRecord",
     "PersistenceBase",
