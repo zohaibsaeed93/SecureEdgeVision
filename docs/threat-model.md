@@ -55,6 +55,9 @@ signatures, keys, SQL, paths, or lower-level exception text.
 Accepted metadata is acknowledged only after the SQLite commit. If persistence
 fails after replay reservation, the reservation remains until TTL because the
 durable outcome may be uncertain. This can temporarily reduce availability but
-does not silently permit replay. Rejection-alert persistence is not yet wired, so
-current rejections create no audit row; that limitation is the next Milestone 1
-boundary.
+does not silently permit replay. Unknown-node, invalid-signature, stale/future, and
+replay rejections are acknowledged only after a sanitized alert commits. Alert
+records contain server-generated identity/time and validated claimed identifiers,
+not the body, detections, signature, key material, or exception details. If an alert
+write is uncertain, the request fails closed with a sanitized service error. The
+bounded read-only alert endpoint exposes only that revalidated audit model.

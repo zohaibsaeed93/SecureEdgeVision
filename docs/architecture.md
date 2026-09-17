@@ -67,9 +67,10 @@ request, log, or fallback output.
 The worker follows no redirects and automatically retries neither request. A lost
 response is therefore reported as an ambiguous failed delivery, not fabricated
 success. Heartbeats are not signed in the current wire contract, HTTP is suitable
-only for the local demo, and node registration/aggregator verification remain later
-Milestone 1 boundaries. Event signatures establish origin and byte integrity only,
-not detector truth.
+only for the local demo, and heartbeat ingestion plus automated node registration
+remain later Milestone 1 boundaries. The aggregator now performs registered-key
+event verification. Event signatures establish origin and byte integrity only, not
+detector truth.
 
 ## Aggregator persistence boundary
 
@@ -94,14 +95,16 @@ Engine creation, schema initialization, sessions, commits, rollbacks, and node
 seeding are explicit caller actions. Initialization is idempotent for the exact
 schema and preserves rows; it neither drops data nor pretends to migrate an
 incompatible database. Heartbeat ingestion, alert persistence, and query APIs are
-intentionally outside this persistence boundary.
+not implicit schema behavior: alert writes and reads are explicit application-layer
+operations, while heartbeat ingestion and node/event queries remain later tasks.
 
 ## Authenticated detection ingestion
 
 The aggregator is created only through an explicit FastAPI factory. One caller-owned
 `ReplayFreshnessPolicy` lives for the lifetime of the app, while every request gets
-a short-lived SQLAlchemy session. The only current server route is
-`POST /v1/events/detections`; documentation/OpenAPI convenience routes are disabled
+a short-lived SQLAlchemy session. The current routes are
+`POST /v1/events/detections` and the bounded read-only
+`GET /v1/security/alerts`; documentation/OpenAPI convenience routes are disabled
 so unimplemented surfaces are not implied.
 
 The HTTP adapter bounds streamed bytes before parsing and applies strict JSON and
@@ -111,3 +114,12 @@ reservation, and metadata persistence in that order. HTTP 202 is emitted only af
 commit. Failures roll back and close the request session; a replay reservation made
 before an uncertain commit failure remains until its configured TTL. The runtime
 uses a single Uvicorn worker because replay state is process-local.
+
+Security rejections use the same request-scoped session to commit exactly one
+sanitized `SecurityAlertRecord` before exposing their stable 401/409 outcome.
+Unknown-node claims can be audited because alerts intentionally have no node foreign
+key. Alert identity and occurrence time are server generated, and only validated
+node/event/nonce identifiers are retained. If the alert write is uncertain, the
+adapter returns a sanitized 503 instead of claiming an unaudited rejection. The
+reusable alert query returns at most the explicit documented limit, newest first
+with an alert-ID tie-breaker, and revalidates every stored row before exposure.

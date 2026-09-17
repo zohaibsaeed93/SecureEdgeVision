@@ -6,10 +6,15 @@ deliberately independent from FastAPI and performs no work at import time.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from enum import StrEnum
+from typing import NoReturn
+from uuid import uuid4
 
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session
 
 from secureedge.contracts import SignedDetectionEnvelope
 from secureedge.crypto import KeyMaterialError, load_public_key, verify_detection_envelope
@@ -17,6 +22,8 @@ from secureedge.persistence import (
     DetectionEventRecord,
     NodeRecord,
     PersistenceError,
+    SecurityAlert,
+    SecurityAlertRecord,
     SessionFactory,
 )
 from secureedge.security import (
@@ -45,6 +52,26 @@ _SECURITY_REASON_MAP = {
     EventSecurityReason.REPLAYED_EVENT_ID: IngestionReason.REPLAYED_EVENT_ID,
     EventSecurityReason.REPLAYED_NONCE: IngestionReason.REPLAYED_NONCE,
 }
+
+_ALERT_CATEGORY_BY_REASON = {
+    IngestionReason.UNKNOWN_NODE: "identity",
+    IngestionReason.INVALID_SIGNATURE: "integrity",
+    IngestionReason.STALE_TIMESTAMP: "freshness",
+    IngestionReason.FUTURE_TIMESTAMP: "freshness",
+    IngestionReason.REPLAYED_EVENT_ID: "replay",
+    IngestionReason.REPLAYED_NONCE: "replay",
+}
+
+AlertClock = Callable[[], datetime]
+AlertIdFactory = Callable[[], str]
+
+
+def _system_utc_now() -> datetime:
+    return datetime.now(UTC)
+
+
+def _new_alert_id() -> str:
+    return uuid4().hex
 
 
 class IngestionRejection(RuntimeError):
@@ -83,13 +110,22 @@ class DetectionEventIngestor:
         self,
         session_factory: SessionFactory,
         replay_policy: ReplayFreshnessPolicy,
+        *,
+        alert_clock: AlertClock | None = None,
+        alert_id_factory: AlertIdFactory | None = None,
     ) -> None:
         if not callable(session_factory):
             raise TypeError("session factory must be callable")
         if not isinstance(replay_policy, ReplayFreshnessPolicy):
             raise TypeError("replay policy must be a ReplayFreshnessPolicy")
+        if alert_clock is not None and not callable(alert_clock):
+            raise TypeError("alert clock must be callable")
+        if alert_id_factory is not None and not callable(alert_id_factory):
+            raise TypeError("alert ID factory must be callable")
         self._session_factory = session_factory
         self._replay_policy = replay_policy
+        self._alert_clock = alert_clock or _system_utc_now
+        self._alert_id_factory = alert_id_factory or _new_alert_id
 
     def ingest(self, envelope: SignedDetectionEnvelope) -> IngestionAcceptance:
         """Accept a strict envelope or raise one sanitized typed failure.
@@ -107,7 +143,7 @@ class DetectionEventIngestor:
         try:
             node = session.get(NodeRecord, envelope.body.node_id)
             if node is None:
-                raise IngestionRejection(IngestionReason.UNKNOWN_NODE)
+                self._record_rejection(session, envelope, IngestionReason.UNKNOWN_NODE)
 
             try:
                 registration = node.to_registration()
@@ -117,7 +153,7 @@ class DetectionEventIngestor:
                 raise IngestionServiceError() from exc
 
             if not signature_is_valid:
-                raise IngestionRejection(IngestionReason.INVALID_SIGNATURE)
+                self._record_rejection(session, envelope, IngestionReason.INVALID_SIGNATURE)
 
             try:
                 decision = self._replay_policy.accept_verified_event(envelope.body)
@@ -125,7 +161,7 @@ class DetectionEventIngestor:
                 reason = _SECURITY_REASON_MAP.get(exc.reason)
                 if reason is None:
                     raise IngestionServiceError() from exc
-                raise IngestionRejection(reason) from exc
+                self._record_rejection(session, envelope, reason, cause=exc)
             except EventSecurityConfigurationError as exc:
                 raise IngestionServiceError() from exc
 
@@ -153,8 +189,42 @@ class DetectionEventIngestor:
         finally:
             session.close()
 
+    def _record_rejection(
+        self,
+        session: Session,
+        envelope: SignedDetectionEnvelope,
+        reason: IngestionReason,
+        *,
+        cause: Exception | None = None,
+    ) -> NoReturn:
+        """Commit one sanitized alert before exposing a security rejection."""
+
+        category = _ALERT_CATEGORY_BY_REASON.get(reason)
+        if category is None:
+            raise IngestionServiceError() from cause
+        alert = SecurityAlert(
+            alert_id=self._alert_id_factory(),
+            occurred_at_utc=self._alert_clock(),
+            category=category,
+            reason=reason.value,
+            node_id=envelope.body.node_id,
+            event_id=envelope.body.event_id,
+            nonce=envelope.body.nonce,
+        )
+        try:
+            session.add(SecurityAlertRecord.from_alert(alert))
+            session.commit()
+        except Exception as exc:
+            raise IngestionServiceError() from exc
+        rejection = IngestionRejection(reason)
+        if cause is None:
+            raise rejection
+        raise rejection from cause
+
 
 __all__ = [
+    "AlertClock",
+    "AlertIdFactory",
     "DetectionEventIngestor",
     "IngestionAcceptance",
     "IngestionReason",

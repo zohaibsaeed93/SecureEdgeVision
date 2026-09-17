@@ -8,6 +8,7 @@ import subprocess
 import sys
 from collections.abc import AsyncIterator, Callable, Iterator
 from datetime import UTC, datetime, timedelta
+from itertools import count
 from typing import Any
 
 import httpx
@@ -15,6 +16,7 @@ import pytest
 from apps.aggregator import main as aggregator_main
 from apps.aggregator.api import (
     DETECTION_INGEST_PATH,
+    SECURITY_ALERTS_PATH,
     _read_bounded_body,
     _RequestFailure,
     create_app,
@@ -25,14 +27,17 @@ from secureedge.canonical import canonical_event_bytes
 from secureedge.config import SecuritySettings
 from secureedge.contracts import DetectionEvent, NodeRegistration, SignedDetectionEnvelope
 from secureedge.crypto import encode_public_key
-from secureedge.ingestion import DetectionEventIngestor
+from secureedge.ingestion import DetectionEventIngestor, IngestionRejection
 from secureedge.persistence import (
     DetectionEventRecord,
     NodeRecord,
+    PersistenceError,
+    SecurityAlert,
     SecurityAlertRecord,
     create_session_factory,
     create_sqlite_engine,
     initialize_database,
+    list_security_alerts,
     seed_node_registry,
 )
 from secureedge.security import ReplayFreshnessPolicy
@@ -146,10 +151,24 @@ def _app(
     clock: Callable[[], datetime] = lambda: NOW,
 ) -> Any:
     policy = ReplayFreshnessPolicy(settings, clock=clock)
+    alert_ids = count(1)
+
+    def ingestor_factory(
+        factory: Any,
+        replay_policy: ReplayFreshnessPolicy,
+    ) -> DetectionEventIngestor:
+        return DetectionEventIngestor(
+            factory,
+            replay_policy,
+            alert_clock=clock,
+            alert_id_factory=lambda: f"alert-{next(alert_ids)}",
+        )
+
     return create_app(
         security_settings=settings,
         session_factory=session_factory,  # type: ignore[arg-type]
         replay_policy=policy,
+        ingestor_factory=ingestor_factory,
     )
 
 
@@ -164,12 +183,24 @@ async def _post(app: Any, content: bytes, headers: dict[str, str] | None = None)
         return await client.post(DETECTION_INGEST_PATH, content=content, headers=actual_headers)
 
 
+async def _get(app: Any, path: str = SECURITY_ALERTS_PATH) -> httpx.Response:
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
+        return await client.get(path)
+
+
 def _row_counts(session_factory: Callable[[], Session]) -> tuple[int, int]:
     with session_factory() as session:
         return (
             session.scalar(select(func.count()).select_from(DetectionEventRecord)) or 0,
             session.scalar(select(func.count()).select_from(SecurityAlertRecord)) or 0,
         )
+
+
+def _alerts(session_factory: Callable[[], Session]) -> list[SecurityAlert]:
+    return list_security_alerts(session_factory, limit=100)  # type: ignore[arg-type]
 
 
 @pytest.mark.asyncio
@@ -221,7 +252,7 @@ async def test_empty_detections_and_nullable_job_are_accepted(
 
 
 @pytest.mark.asyncio
-async def test_unknown_node_and_tampered_signature_fail_without_rows(
+async def test_unknown_node_and_tampered_signature_create_sanitized_alerts(
     private_key: Ed25519PrivateKey,
     settings: SecuritySettings,
     session_factory: Callable[[], Session],
@@ -244,7 +275,11 @@ async def test_unknown_node_and_tampered_signature_fail_without_rows(
     response = await _post(app, _body(tampered))
     assert response.status_code == 401
     assert response.json() == {"detail": {"code": "invalid_signature"}}
-    assert _row_counts(session_factory) == (0, 0)
+    assert _row_counts(session_factory) == (0, 2)
+    assert {(alert.category, alert.reason) for alert in _alerts(session_factory)} == {
+        ("identity", "unknown_node"),
+        ("integrity", "invalid_signature"),
+    }
 
 
 @pytest.mark.asyncio
@@ -266,7 +301,10 @@ async def test_invalid_signature_does_not_reserve_replay_identifiers(
 
     assert (await _post(app, _body(invalid))).status_code == 401
     assert (await _post(app, _body(valid))).status_code == 202
-    assert _row_counts(session_factory) == (1, 0)
+    assert _row_counts(session_factory) == (1, 1)
+    assert [(alert.category, alert.reason) for alert in _alerts(session_factory)] == [
+        ("integrity", "invalid_signature")
+    ]
 
 
 @pytest.mark.asyncio
@@ -294,7 +332,10 @@ async def test_replay_is_node_scoped_and_returns_409(
     response = await _post(app, _body(_sign(second, private_key)))
     assert response.status_code == 409
     assert response.json() == {"detail": {"code": reason}}
-    assert _row_counts(session_factory) == (1, 0)
+    assert _row_counts(session_factory) == (1, 1)
+    assert [(alert.category, alert.reason) for alert in _alerts(session_factory)] == [
+        ("replay", reason)
+    ]
 
 
 @pytest.mark.asyncio
@@ -323,7 +364,10 @@ async def test_freshness_failures_return_409(
     )
     assert response.status_code == 409
     assert response.json() == {"detail": {"code": reason}}
-    assert _row_counts(session_factory) == (0, 0)
+    assert _row_counts(session_factory) == (0, 1)
+    assert [(alert.category, alert.reason) for alert in _alerts(session_factory)] == [
+        ("freshness", reason)
+    ]
 
 
 @pytest.mark.asyncio
@@ -361,7 +405,7 @@ async def test_concurrent_duplicates_commit_at_most_once(
     payload = _body(_sign(_event(), private_key))
     responses = await asyncio.gather(_post(app, payload), _post(app, payload))
     assert sorted(response.status_code for response in responses) == [202, 409]
-    assert _row_counts(session_factory) == (1, 0)
+    assert _row_counts(session_factory) == (1, 1)
 
 
 @pytest.mark.asyncio
@@ -525,6 +569,8 @@ async def test_corrupt_registry_record_returns_sanitized_503(
 class _FailingCommitSession:
     def __init__(self, session: Session) -> None:
         self._session = session
+        self.rollback_calls = 0
+        self.closed = False
 
     def get(self, *args: Any, **kwargs: Any) -> Any:
         return self._session.get(*args, **kwargs)
@@ -536,9 +582,11 @@ class _FailingCommitSession:
         raise SQLAlchemyError("secret database path")
 
     def rollback(self) -> None:
+        self.rollback_calls += 1
         self._session.rollback()
 
     def close(self) -> None:
+        self.closed = True
         self._session.close()
 
 
@@ -554,8 +602,10 @@ async def test_commit_failure_is_sanitized_and_keeps_replay_reservation(
         registered_at_utc=NOW,
     )
     policy = ReplayFreshnessPolicy(settings, clock=lambda: NOW)
+
     def failing_factory() -> _FailingCommitSession:
         return _FailingCommitSession(session_factory())
+
     failing_app = create_app(
         security_settings=settings,
         session_factory=failing_factory,  # type: ignore[arg-type]
@@ -577,16 +627,206 @@ async def test_commit_failure_is_sanitized_and_keeps_replay_reservation(
     replay = await _post(healthy_app, payload)
     assert replay.status_code == 409
     assert replay.json() == {"detail": {"code": "replayed_event_id"}}
+    assert _row_counts(session_factory) == (0, 1)
+
+
+def test_alert_uses_injected_trusted_clock_id_and_sanitized_context(
+    private_key: Ed25519PrivateKey,
+    settings: SecuritySettings,
+    session_factory: Callable[[], Session],
+) -> None:
+    ingestor = DetectionEventIngestor(
+        session_factory,  # type: ignore[arg-type]
+        ReplayFreshnessPolicy(settings, clock=lambda: NOW),
+        alert_clock=lambda: NOW,
+        alert_id_factory=lambda: "alert-fixed",
+    )
+
+    with pytest.raises(IngestionRejection, match="^unknown_node$"):
+        ingestor.ingest(_sign(_event(), private_key))
+
+    assert _alerts(session_factory) == [
+        SecurityAlert(
+            alert_id="alert-fixed",
+            occurred_at_utc=NOW,
+            category="identity",
+            reason="unknown_node",
+            node_id="edge-1",
+            event_id="event-1",
+            nonce="nonce-1",
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_alert_commit_failure_is_sanitized_rolls_back_and_closes(
+    private_key: Ed25519PrivateKey,
+    settings: SecuritySettings,
+    session_factory: Callable[[], Session],
+) -> None:
+    sessions: list[_FailingCommitSession] = []
+
+    def failing_factory() -> _FailingCommitSession:
+        session = _FailingCommitSession(session_factory())
+        sessions.append(session)
+        return session
+
+    app = create_app(
+        security_settings=settings,
+        session_factory=failing_factory,  # type: ignore[arg-type]
+        replay_policy=ReplayFreshnessPolicy(settings, clock=lambda: NOW),
+    )
+    response = await _post(app, _body(_sign(_event(), private_key)))
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": {"code": "service_unavailable"}}
+    assert "secret" not in response.text
+    assert _row_counts(session_factory) == (0, 0)
+    assert len(sessions) == 1
+    assert sessions[0].rollback_calls == 1
+    assert sessions[0].closed is True
+
+
+@pytest.mark.asyncio
+async def test_security_alert_query_is_typed_bounded_and_deterministic(
+    settings: SecuritySettings,
+    session_factory: Callable[[], Session],
+) -> None:
+    app = _app(settings, session_factory)
+    assert (await _get(app)).json() == []
+
+    alerts = [
+        SecurityAlert(
+            alert_id="alert-old",
+            occurred_at_utc=NOW - timedelta(seconds=1),
+            category="identity",
+            reason="unknown_node",
+            node_id="edge-1",
+            event_id="event-old",
+            nonce="nonce-old",
+        ),
+        SecurityAlert(
+            alert_id="alert-tie-a",
+            occurred_at_utc=NOW,
+            category="replay",
+            reason="replayed_event_id",
+            node_id="edge-1",
+            event_id="event-a",
+            nonce="nonce-a",
+        ),
+        SecurityAlert(
+            alert_id="alert-tie-b",
+            occurred_at_utc=NOW,
+            category="freshness",
+            reason="stale_timestamp",
+            node_id="edge-2",
+            event_id="event-b",
+            nonce="nonce-b",
+        ),
+    ]
+    with session_factory() as session:
+        session.add_all(SecurityAlertRecord.from_alert(alert) for alert in alerts)
+        session.commit()
+
+    response = await _get(app, f"{SECURITY_ALERTS_PATH}?limit=0002")
+    assert response.status_code == 200
+    assert response.json() == [
+        alerts[2].model_dump(mode="json"),
+        alerts[1].model_dump(mode="json"),
+    ]
+    assert set(response.json()[0]) == {
+        "alert_id",
+        "occurred_at_utc",
+        "category",
+        "reason",
+        "node_id",
+        "event_id",
+        "nonce",
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "query",
+    [
+        "limit=0",
+        "limit=101",
+        "limit=bogus",
+        f"limit={'9' * 5000}",
+        "limit=1&limit=2",
+        "unknown=1",
+    ],
+)
+async def test_security_alert_query_rejects_invalid_parameters(
+    settings: SecuritySettings,
+    session_factory: Callable[[], Session],
+    query: str,
+) -> None:
+    response = await _get(_app(settings, session_factory), f"{SECURITY_ALERTS_PATH}?{query}")
+    assert response.status_code == 422
+    assert response.json() == {"detail": {"code": "invalid_request"}}
     assert _row_counts(session_factory) == (0, 0)
 
 
-def test_app_has_one_route_and_one_process_owned_policy(
+@pytest.mark.parametrize("limit", [0, 101, True, "1"])
+def test_security_alert_domain_query_rejects_invalid_limits(
+    session_factory: Callable[[], Session],
+    limit: Any,
+) -> None:
+    with pytest.raises(PersistenceError, match="^security alert query limit is invalid$"):
+        list_security_alerts(session_factory, limit=limit)  # type: ignore[arg-type]
+
+
+class _FailingQuerySession:
+    def __init__(self) -> None:
+        self.rollback_calls = 0
+        self.closed = False
+
+    def scalars(self, value: object) -> None:
+        del value
+        raise SQLAlchemyError("secret database path")
+
+    def rollback(self) -> None:
+        self.rollback_calls += 1
+
+    def close(self) -> None:
+        self.closed = True
+
+
+@pytest.mark.asyncio
+async def test_security_alert_query_failure_is_sanitized_and_closes(
+    settings: SecuritySettings,
+) -> None:
+    sessions: list[_FailingQuerySession] = []
+
+    def failing_factory() -> _FailingQuerySession:
+        session = _FailingQuerySession()
+        sessions.append(session)
+        return session
+
+    app = create_app(
+        security_settings=settings,
+        session_factory=failing_factory,  # type: ignore[arg-type]
+        replay_policy=ReplayFreshnessPolicy(settings, clock=lambda: NOW),
+    )
+    response = await _get(app)
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": {"code": "service_unavailable"}}
+    assert "secret" not in response.text
+    assert len(sessions) == 1
+    assert sessions[0].rollback_calls == 1
+    assert sessions[0].closed is True
+
+
+def test_app_has_only_current_routes_and_one_process_owned_policy(
     settings: SecuritySettings,
     session_factory: Callable[[], Session],
 ) -> None:
     app = _app(settings, session_factory)
     assert [(route.path, sorted(route.methods or [])) for route in app.routes] == [
-        (DETECTION_INGEST_PATH, ["POST"])
+        (DETECTION_INGEST_PATH, ["POST"]),
+        (SECURITY_ALERTS_PATH, ["GET"]),
     ]
     assert isinstance(app.state.replay_policy, ReplayFreshnessPolicy)
     assert isinstance(app.state.ingestor, DetectionEventIngestor)
@@ -625,6 +865,7 @@ del sys.modules["apps.aggregator.main"]
 importlib.import_module("apps.aggregator.api")
 importlib.import_module("apps.aggregator.main")
 assert apps.aggregator.api.DETECTION_INGEST_PATH == "/v1/events/detections"
+assert apps.aggregator.api.SECURITY_ALERTS_PATH == "/v1/security/alerts"
 """
     subprocess.run([sys.executable, "-c", script], check=True)
 
