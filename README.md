@@ -12,8 +12,10 @@ Milestone 1 is being delivered in reviewed coherent boundaries. The repository n
 contains strict detection/node contracts, deterministic canonicalization, Ed25519
 primitives, process-local replay/freshness policy, normalized local YOLO inference,
 the local privacy-worker pipeline, and one-attempt signed metadata transport with
-periodic metadata-only heartbeats. Aggregator persistence/API, dashboard behavior,
-and the end-to-end demo remain later Milestone 1 tasks.
+periodic metadata-only heartbeats. It also contains the explicit SQLAlchemy/SQLite
+persistence foundation for registered public node identities, accepted detection
+metadata, and sanitized security-alert metadata. Aggregator API behavior, dashboard
+behavior, and the end-to-end demo remain later Milestone 1 tasks.
 
 Milestone 1 is the supervisor-demo vertical slice: local YOLO inference, normalized `DetectionEvent` creation, Ed25519 signing, freshness/replay protection, signed metadata transport, FastAPI aggregation, SQLite persistence, security alerts, health/query APIs, a basic dashboard, tests, CI, and demo documentation. Milestones 2–4 remain future work and are not implemented here.
 
@@ -79,6 +81,13 @@ revocation are outside this milestone.
 ## Security boundary
 
 Private keys belong only in the ignored local `secrets/` directory and must never be committed. Privacy-mode workers must never send raw camera frames to the aggregator. Thresholds such as clock skew, nonce TTL, request size, confidence, and image size belong in configuration, not hidden code constants. Signatures authenticate the node and signed bytes; they do not validate the truth of a detector’s output.
+
+The persistence module has no import-time database behavior. An application must
+explicitly supply an approved local SQLite URL, create its engine/session factory,
+and call the non-destructive initializer. It stores only public node identity and
+validated metadata—never frames, crops, tensors, model bytes, private keys,
+credentials, or arbitrary request bodies. Replay expiry remains process-local and
+configured; database rows do not create permanent event-ID or nonce uniqueness.
 
 ## Milestone roadmap
 
