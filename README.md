@@ -2,7 +2,7 @@
 
 SecureEdgeVision is a research-oriented distributed computer-vision system. Computer vision is the workload, edge/distributed computing is the execution architecture, and information security is the research problem.
 
-In privacy mode, an edge worker keeps camera frames local, runs a pretrained Ultralytics YOLO nano detector, creates compact normalized detection metadata, signs each event with a node-specific Ed25519 key, and sends only signed metadata to a central aggregator. The aggregator will verify node identity, signatures, freshness, and replay protection before persisting accepted events and security audit data.
+In privacy mode, an edge worker keeps camera frames local, runs a pretrained Ultralytics YOLO nano detector, creates compact normalized detection metadata, signs each event with a node-specific Ed25519 key, and sends only signed metadata to a central aggregator. The aggregator verifies node identity, signatures, freshness, and replay protection before persisting accepted events and security audit data.
 
 Replicated Byzantine benchmark mode is a separate future research path for public benchmark inputs. It must not be confused with privacy mode: a valid signature proves origin and integrity, not that a detection is semantically correct.
 
@@ -18,8 +18,10 @@ metadata, and sanitized security-alert metadata. The aggregator now exposes the
 bounded authenticated detection-ingest route: it validates strict JSON, resolves a
 registered public key, verifies the Ed25519 signature, applies the configured
 freshness/replay policy, and commits accepted metadata before returning HTTP 202.
-Security-alert persistence, query APIs, dashboard behavior, and the end-to-end demo
-remain later Milestone 1 tasks.
+It also commits sanitized audit metadata for identity, integrity, freshness, and
+replay rejections before returning 401/409, and exposes a bounded read-only security
+alert view. Node/event/health query APIs, dashboard behavior, and the end-to-end
+demo remain later Milestone 1 tasks.
 
 Milestone 1 is the supervisor-demo vertical slice: local YOLO inference, normalized `DetectionEvent` creation, Ed25519 signing, freshness/replay protection, signed metadata transport, FastAPI aggregation, SQLite persistence, security alerts, health/query APIs, a basic dashboard, tests, CI, and demo documentation. Milestones 2–4 remain future work and are not implemented here.
 
@@ -110,6 +112,10 @@ The ingestion route bounds the streamed body before JSON parsing, rejects duplic
 JSON keys and non-finite values, authenticates before reserving replay identifiers,
 and returns only stable sanitized errors. A reservation is retained until TTL if a
 later commit outcome fails, preventing an uncertain write from reopening replay.
+Security rejections are acknowledged only after their sanitized alert commits;
+alert-write uncertainty returns a sanitized service failure. The read-only
+`GET /v1/security/alerts` view returns only bounded audit metadata and never
+stores or exposes request bodies, signatures, keys, or detector payloads.
 
 ## Milestone roadmap
 

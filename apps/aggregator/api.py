@@ -7,7 +7,7 @@ import math
 from collections.abc import Callable
 from typing import Any, NoReturn
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 from pydantic import ValidationError
 from secureedge.config import SecuritySettings
@@ -18,10 +18,18 @@ from secureedge.ingestion import (
     IngestionRejection,
     IngestionServiceError,
 )
-from secureedge.persistence import SessionFactory
+from secureedge.persistence import (
+    DEFAULT_SECURITY_ALERT_QUERY_LIMIT,
+    MAX_SECURITY_ALERT_QUERY_LIMIT,
+    PersistenceError,
+    SecurityAlert,
+    SessionFactory,
+    list_security_alerts,
+)
 from secureedge.security import ReplayFreshnessPolicy
 
 DETECTION_INGEST_PATH = "/v1/events/detections"
+SECURITY_ALERTS_PATH = "/v1/security/alerts"
 
 
 class _RequestFailure(Exception):
@@ -133,6 +141,25 @@ def _require_json(request: Request) -> None:
         raise _RequestFailure(422, "invalid_request")
 
 
+def _security_alert_limit(request: Request) -> int:
+    parameters = request.query_params.multi_items()
+    if not parameters:
+        return DEFAULT_SECURITY_ALERT_QUERY_LIMIT
+    if len(parameters) != 1 or parameters[0][0] != "limit":
+        raise _RequestFailure(422, "invalid_request")
+
+    raw = parameters[0][1]
+    if not raw.isascii() or not raw.isdecimal():
+        raise _RequestFailure(422, "invalid_request")
+    normalized = raw.lstrip("0") or "0"
+    maximum_decimal = str(MAX_SECURITY_ALERT_QUERY_LIMIT)
+    if normalized == "0" or len(normalized) > len(maximum_decimal) or (
+        len(normalized) == len(maximum_decimal) and normalized > maximum_decimal
+    ):
+        raise _RequestFailure(422, "invalid_request")
+    return int(normalized)
+
+
 def create_app(
     *,
     security_settings: SecuritySettings,
@@ -183,7 +210,33 @@ def create_app(
             return _json_error(503, IngestionReason.SERVICE_UNAVAILABLE.value)
         return Response(status_code=202)
 
+    @app.get(SECURITY_ALERTS_PATH, response_model=list[SecurityAlert])
+    def get_security_alerts(request: Request) -> list[SecurityAlert]:
+        try:
+            limit = _security_alert_limit(request)
+            return list_security_alerts(session_factory, limit=limit)
+        except _RequestFailure as exc:
+            raise HTTPException(
+                status_code=exc.status_code,
+                detail={"code": exc.code},
+            ) from None
+        except PersistenceError:
+            raise HTTPException(
+                status_code=503,
+                detail={"code": IngestionReason.SERVICE_UNAVAILABLE.value},
+            ) from None
+        except Exception:
+            raise HTTPException(
+                status_code=503,
+                detail={"code": IngestionReason.SERVICE_UNAVAILABLE.value},
+            ) from None
+
     return app
 
 
-__all__ = ["DETECTION_INGEST_PATH", "create_app", "parse_detection_envelope"]
+__all__ = [
+    "DETECTION_INGEST_PATH",
+    "SECURITY_ALERTS_PATH",
+    "create_app",
+    "parse_detection_envelope",
+]

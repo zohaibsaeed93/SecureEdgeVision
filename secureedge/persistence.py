@@ -53,6 +53,8 @@ from secureedge.contracts import (
 _LOCAL_SQLITE_DRIVERS = frozenset({"sqlite", "sqlite+pysqlite"})
 _SAFE_DATABASE_PATH = re.compile(r"^[A-Za-z0-9_./-]+$")
 _MACHINE_CODE_PATTERN = r"^[a-z][a-z0-9_.:-]*$"
+DEFAULT_SECURITY_ALERT_QUERY_LIMIT = 50
+MAX_SECURITY_ALERT_QUERY_LIMIT = 100
 
 
 class PersistenceError(RuntimeError):
@@ -465,6 +467,56 @@ def seed_node_registry(
     return inserted
 
 
+def list_security_alerts(
+    factory: SessionFactory,
+    *,
+    limit: int = DEFAULT_SECURITY_ALERT_QUERY_LIMIT,
+) -> list[SecurityAlert]:
+    """Return a bounded, deterministic newest-first view of sanitized alerts."""
+
+    if not callable(factory):
+        raise PersistenceError("security alert query failed")
+    if (
+        isinstance(limit, bool)
+        or not isinstance(limit, int)
+        or not 1 <= limit <= MAX_SECURITY_ALERT_QUERY_LIMIT
+    ):
+        raise PersistenceError("security alert query limit is invalid")
+
+    try:
+        session = factory()
+    except Exception as exc:
+        raise PersistenceError("security alert query failed") from exc
+
+    try:
+        records = session.scalars(
+            select(SecurityAlertRecord)
+            .order_by(
+                SecurityAlertRecord.occurred_at_utc.desc(),
+                SecurityAlertRecord.alert_id.desc(),
+            )
+            .limit(limit)
+        ).all()
+        return [record.to_alert() for record in records]
+    except PersistenceError:
+        try:
+            session.rollback()
+        except Exception:
+            pass
+        raise
+    except Exception as exc:
+        try:
+            session.rollback()
+        except Exception:
+            pass
+        raise PersistenceError("security alert query failed") from exc
+    finally:
+        try:
+            session.close()
+        except Exception as exc:
+            raise PersistenceError("security alert query failed") from exc
+
+
 def _validate_database_url(database_url: str) -> None:
     if not isinstance(database_url, str) or not database_url:
         raise PersistenceError("database URL is not an approved local SQLite URL")
@@ -688,7 +740,9 @@ def _deserialize_detections(value: str) -> list[Detection]:
 
 
 __all__ = [
+    "DEFAULT_SECURITY_ALERT_QUERY_LIMIT",
     "DetectionEventRecord",
+    "MAX_SECURITY_ALERT_QUERY_LIMIT",
     "NodeRecord",
     "PersistenceBase",
     "PersistenceError",
@@ -698,6 +752,7 @@ __all__ = [
     "create_session_factory",
     "create_sqlite_engine",
     "initialize_database",
+    "list_security_alerts",
     "seed_node_registry",
     "session_scope",
 ]

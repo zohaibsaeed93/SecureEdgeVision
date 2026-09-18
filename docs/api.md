@@ -1,6 +1,6 @@
 # API contract
 
-The Milestone 1 aggregator exposes one current typed FastAPI route. Other planned
+The Milestone 1 aggregator exposes two current typed FastAPI routes. Other planned
 endpoints remain separate reviewed boundaries:
 
 - `GET /health` for liveness/readiness and database/node summary
@@ -8,7 +8,7 @@ endpoints remain separate reviewed boundaries:
 - `POST /v1/nodes/heartbeat` for worker health
 - `GET /v1/nodes` for node status
 - `GET /v1/events` for recent accepted metadata
-- `GET /v1/security/alerts` for signature, freshness, replay, and later semantic alerts
+- `GET /v1/security/alerts` for sanitized identity, integrity, freshness, and replay alerts (**implemented**)
 - `GET /metrics` for Prometheus counters and histograms
 
 The current response policy is: accepted event `202`; unknown node or invalid
@@ -32,8 +32,29 @@ Processing order is fixed: validate the bounded wire request, look up the claime
 node in the SQLite registry, verify the signature with only that stored public key,
 apply the single app-owned freshness/replay policy, then commit a metadata-only
 `DetectionEventRecord`. Unknown nodes and invalid signatures do not mutate replay
-state. Rejections do not create accepted-event or security-alert rows; alert
-persistence is intentionally the next task.
+state. A security rejection commits exactly one sanitized audit alert before the
+adapter returns its 401/409 status. Alert-write uncertainty fails closed as the
+same sanitized 503 used for other persistence failures.
+
+## Current security-alert behavior
+
+`GET /v1/security/alerts` is read-only and returns a JSON array of strict
+`SecurityAlert` values ordered by `occurred_at_utc` descending and then
+`alert_id` descending. The only fields are `alert_id`,
+`occurred_at_utc`, `category`, `reason`, `node_id`, `event_id`,
+and `nonce`. It never returns payloads, detections, signatures, key material,
+request bodies, or internal errors.
+
+The optional `limit` query parameter defaults to 50 and accepts decimal values
+from 1 through 100. Duplicate, unknown, malformed, zero, or oversized query values
+return the stable 422 `invalid_request` response. Database/query uncertainty
+returns the stable 503 `service_unavailable` response.
+
+Alert categories and reasons are fixed for this boundary: `identity/unknown_node`,
+`integrity/invalid_signature`, `freshness/stale_timestamp`,
+`freshness/future_timestamp`, `replay/replayed_event_id`, and
+`replay/replayed_nonce`. Accepted events, malformed contracts, oversized
+requests, and non-security dependency failures do not create alert rows.
 
 ## Current worker request behavior
 
@@ -46,8 +67,9 @@ gets at most one automatic attempt so an ambiguous lost response cannot cause a
 silent duplicate retry.
 
 The heartbeat wire model remains unsigned. The worker transport does not implement
-registration, registry lookup, ingest verification, replay enforcement,
-persistence, or any server route; those are later Milestone 1 boundaries.
+server registration or verification itself; the aggregator owns registered-key
+ingest verification and persistence. Heartbeat ingestion remains a later Milestone
+1 boundary.
 
 ## Milestone 1 wire contracts
 
@@ -145,8 +167,8 @@ rotation, revocation, PKI, and TLS are not claimed by this milestone.
 caller. It accepts timestamps at the inclusive edges of the configured clock-skew
 window and otherwise raises `EventSecurityRejection` with one stable reason:
 `stale_timestamp`, `future_timestamp`, `replayed_event_id`, or `replayed_nonce`.
-The later FastAPI adapter can map those rejections to the planned `409` response
-without inspecting exception text.
+The FastAPI adapter maps those rejections to `409` and commits their sanitized
+security alerts without inspecting exception text.
 
 The policy normalizes accepted clock and event timestamps to plain UTC datetimes.
 Malformed datetime behavior and a clock that moves behind the latest accepted
