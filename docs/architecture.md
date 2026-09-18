@@ -66,11 +66,12 @@ request, log, or fallback output.
 
 The worker follows no redirects and automatically retries neither request. A lost
 response is therefore reported as an ambiguous failed delivery, not fabricated
-success. Heartbeats are not signed in the current wire contract, HTTP is suitable
-only for the local demo, and heartbeat ingestion plus automated node registration
-remain later Milestone 1 boundaries. The aggregator now performs registered-key
-event verification. Event signatures establish origin and byte integrity only, not
-detector truth.
+success. Heartbeats are not signed in the current wire contract and HTTP is
+suitable only for the local demo. The aggregator accepts bounded heartbeat data
+only for a pre-registered node and stores it as advisory liveness; this does not
+authenticate the sender. Automated node registration remains out of scope. The
+aggregator performs registered-key event verification separately. Event signatures
+establish origin and byte integrity only, not detector truth.
 
 ## Aggregator persistence boundary
 
@@ -94,18 +95,19 @@ this milestone.
 Engine creation, schema initialization, sessions, commits, rollbacks, and node
 seeding are explicit caller actions. Initialization is idempotent for the exact
 schema and preserves rows; it neither drops data nor pretends to migrate an
-incompatible database. Heartbeat ingestion, alert persistence, and query APIs are
-not implicit schema behavior: alert writes and reads are explicit application-layer
-operations, while heartbeat ingestion and node/event queries remain later tasks.
+incompatible database. Heartbeat ingestion, alert persistence, and monitoring
+queries are explicit application-layer operations rather than implicit schema
+behavior. No migration or second datastore is needed for these views.
 
 ## Authenticated detection ingestion
 
 The aggregator is created only through an explicit FastAPI factory. One caller-owned
-`ReplayFreshnessPolicy` lives for the lifetime of the app, while every request gets
-a short-lived SQLAlchemy session. The current routes are
-`POST /v1/events/detections` and the bounded read-only
-`GET /v1/security/alerts`; documentation/OpenAPI convenience routes are disabled
-so unimplemented surfaces are not implied.
+`ReplayFreshnessPolicy` and one heartbeat service live for the lifetime of the app,
+while every database operation gets a short-lived SQLAlchemy session. The current
+routes are `POST /v1/events/detections`, `POST /v1/nodes/heartbeat`, `GET /health`,
+`GET /v1/nodes`, `GET /v1/events`, and `GET /v1/security/alerts`;
+documentation/OpenAPI convenience routes are disabled so unimplemented surfaces
+are not implied.
 
 The HTTP adapter bounds streamed bytes before parsing and applies strict JSON and
 Pydantic validation. Reusable `DetectionEventIngestor` domain logic then performs
@@ -123,3 +125,27 @@ node/event/nonce identifiers are retained. If the alert write is uncertain, the
 adapter returns a sanitized 503 instead of claiming an unaudited rejection. The
 reusable alert query returns at most the explicit documented limit, newest first
 with an alert-ID tie-breaker, and revalidates every stored row before exposure.
+
+## Advisory heartbeat and monitoring queries
+
+`secureedge.monitoring` owns the reusable monitoring policy without importing
+FastAPI or performing work at import time. `HeartbeatService` first requires an
+existing registry row, applies the configured UTC clock-skew window, and uses a
+conditional database update so an equal, older, or racing heartbeat cannot
+overwrite newer state. Only `last_seen_at_utc` and `health_status` may change. A
+successful 202 follows commit; failure rolls back and closes the request session.
+
+This heartbeat is an explicit local-demo compromise: it is unsigned and therefore
+advisory. Registry lookup prevents arbitrary row creation but does not authenticate
+the sender or make node health authoritative for security decisions. Heartbeat
+rejections consequently do not create authenticated-event security alerts.
+
+The same module exposes read-only typed views for database readiness, public-key-free
+node state, and accepted detection metadata. Node ordering is deterministic by
+identifier. Events are newest-first by trusted acceptance time with the internal
+record ID as a tie-breaker, but that database ID is never exposed. Every stored
+event is reconstructed through the strict `DetectionEvent` contract. Collection
+limits are explicitly bounded; malformed stored rows or database uncertainty fail
+closed as sanitized service errors. No view can expose frames, crops, tensors,
+signatures, key material, DSNs, or local paths, and no hidden online/offline
+threshold is derived.

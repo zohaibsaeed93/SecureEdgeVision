@@ -20,8 +20,10 @@ registered public key, verifies the Ed25519 signature, applies the configured
 freshness/replay policy, and commits accepted metadata before returning HTTP 202.
 It also commits sanitized audit metadata for identity, integrity, freshness, and
 replay rejections before returning 401/409, and exposes a bounded read-only security
-alert view. Node/event/health query APIs, dashboard behavior, and the end-to-end
-demo remain later Milestone 1 tasks.
+alert view. It now also accepts bounded advisory heartbeats for registered nodes
+and exposes sanitized database health, public-key-free node status, and recent
+metadata-only accepted-event views. Dashboard behavior and the end-to-end demo
+remain later Milestone 1 tasks.
 
 Milestone 1 is the supervisor-demo vertical slice: local YOLO inference, normalized `DetectionEvent` creation, Ed25519 signing, freshness/replay protection, signed metadata transport, FastAPI aggregation, SQLite persistence, security alerts, health/query APIs, a basic dashboard, tests, CI, and demo documentation. Milestones 2–4 remain future work and are not implemented here.
 
@@ -116,6 +118,15 @@ Security rejections are acknowledged only after their sanitized alert commits;
 alert-write uncertainty returns a sanitized service failure. The read-only
 `GET /v1/security/alerts` view returns only bounded audit metadata and never
 stores or exposes request bodies, signatures, keys, or detector payloads.
+
+Heartbeat ingestion is a separate unsigned local-demo boundary. It only updates
+the advisory `last_seen_at_utc` and `health_status` fields of an already registered
+node, applies the configured clock-skew window, and atomically refuses older state.
+It is not proof of sender identity, integrity, authorization, or worker correctness
+and is never used as an authenticated security verdict. The `/health`, `/v1/nodes`,
+and `/v1/events` views are bounded and read-only; they expose safe counts, node
+status without public keys, and normalized detection metadata without frames,
+signatures, secrets, or local paths.
 
 ## Milestone roadmap
 
