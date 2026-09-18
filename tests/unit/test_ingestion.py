@@ -16,6 +16,10 @@ import pytest
 from apps.aggregator import main as aggregator_main
 from apps.aggregator.api import (
     DETECTION_INGEST_PATH,
+    EVENTS_PATH,
+    HEALTH_PATH,
+    NODE_HEARTBEAT_PATH,
+    NODES_PATH,
     SECURITY_ALERTS_PATH,
     _read_bounded_body,
     _RequestFailure,
@@ -28,6 +32,7 @@ from secureedge.config import SecuritySettings
 from secureedge.contracts import DetectionEvent, NodeRegistration, SignedDetectionEnvelope
 from secureedge.crypto import encode_public_key
 from secureedge.ingestion import DetectionEventIngestor, IngestionRejection
+from secureedge.monitoring import HeartbeatService
 from secureedge.persistence import (
     DetectionEventRecord,
     NodeRecord,
@@ -826,10 +831,15 @@ def test_app_has_only_current_routes_and_one_process_owned_policy(
     app = _app(settings, session_factory)
     assert [(route.path, sorted(route.methods or [])) for route in app.routes] == [
         (DETECTION_INGEST_PATH, ["POST"]),
+        (NODE_HEARTBEAT_PATH, ["POST"]),
+        (HEALTH_PATH, ["GET"]),
+        (NODES_PATH, ["GET"]),
+        (EVENTS_PATH, ["GET"]),
         (SECURITY_ALERTS_PATH, ["GET"]),
     ]
     assert isinstance(app.state.replay_policy, ReplayFreshnessPolicy)
     assert isinstance(app.state.ingestor, DetectionEventIngestor)
+    assert isinstance(app.state.heartbeat_service, HeartbeatService)
 
 
 def test_aggregator_imports_have_no_runtime_side_effects() -> None:
@@ -865,6 +875,10 @@ del sys.modules["apps.aggregator.main"]
 importlib.import_module("apps.aggregator.api")
 importlib.import_module("apps.aggregator.main")
 assert apps.aggregator.api.DETECTION_INGEST_PATH == "/v1/events/detections"
+assert apps.aggregator.api.EVENTS_PATH == "/v1/events"
+assert apps.aggregator.api.HEALTH_PATH == "/health"
+assert apps.aggregator.api.NODE_HEARTBEAT_PATH == "/v1/nodes/heartbeat"
+assert apps.aggregator.api.NODES_PATH == "/v1/nodes"
 assert apps.aggregator.api.SECURITY_ALERTS_PATH == "/v1/security/alerts"
 """
     subprocess.run([sys.executable, "-c", script], check=True)

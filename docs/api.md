@@ -1,21 +1,22 @@
 # API contract
 
-The Milestone 1 aggregator exposes two current typed FastAPI routes. Other planned
-endpoints remain separate reviewed boundaries:
+The Milestone 1 aggregator exposes six current typed FastAPI routes. Metrics remain
+a separate reviewed boundary:
 
-- `GET /health` for liveness/readiness and database/node summary
+- `GET /health` for database readiness and safe row-count summary (**implemented**)
 - `POST /v1/events/detections` for one signed detection envelope (**implemented**)
-- `POST /v1/nodes/heartbeat` for worker health
-- `GET /v1/nodes` for node status
-- `GET /v1/events` for recent accepted metadata
+- `POST /v1/nodes/heartbeat` for advisory worker health (**implemented**)
+- `GET /v1/nodes` for safe node status (**implemented**)
+- `GET /v1/events` for recent accepted metadata (**implemented**)
 - `GET /v1/security/alerts` for sanitized identity, integrity, freshness, and replay alerts (**implemented**)
-- `GET /metrics` for Prometheus counters and histograms
+- `GET /metrics` for Prometheus counters and histograms (**planned**)
 
-The current response policy is: accepted event `202`; unknown node or invalid
-signature `401`; replay, stale, or future timestamp `409`; malformed JSON or strict
-contract failure `422`; oversized request `413`; and sanitized registry,
-configuration, or persistence failure `503`. A 202 response has an empty body and
-is returned only after the accepted metadata transaction commits.
+The current response policy is: accepted event or heartbeat `202`; unknown node or
+invalid signature `401`; replay, stale, future, or out-of-order timestamp `409`;
+malformed JSON or strict contract failure `422`; oversized request `413`; and
+sanitized registry, clock, configuration, or persistence failure `503`. A 202
+response has an empty body and is returned only after its metadata transaction
+commits.
 
 ## Current authenticated ingestion behavior
 
@@ -68,8 +69,51 @@ silent duplicate retry.
 
 The heartbeat wire model remains unsigned. The worker transport does not implement
 server registration or verification itself; the aggregator owns registered-key
-ingest verification and persistence. Heartbeat ingestion remains a later Milestone
-1 boundary.
+event verification and persistence. Heartbeat state is advisory local-demo
+liveness only and is never used as an authorization or authenticated-security
+verdict.
+
+## Current heartbeat and monitoring behavior
+
+`POST /v1/nodes/heartbeat` requires `application/json`, no query parameters, and
+exactly one strict `{node_id, timestamp_utc, status}` body. It uses the same
+configured streamed request-size bound and strict JSON rules as detection ingest.
+The node must already exist in the explicit registry; heartbeat receipt never
+registers a node or changes its public key. A fresh timestamp atomically advances
+only `last_seen_at_utc` and `health_status` before the route returns an empty 202.
+
+Unknown nodes receive 401 `unknown_node`. Timestamps outside the inclusive
+configured `security.max_clock_skew_seconds` window receive 409
+`stale_timestamp` or `future_timestamp`; a timestamp equal to or older than the
+stored heartbeat receives 409 `out_of_order_heartbeat`. Those rejections never
+overwrite newer state and do not create accepted-event or security-alert rows.
+Persistence or clock uncertainty rolls back and returns only 503
+`service_unavailable`.
+
+Heartbeats are intentionally unsigned in the current wire contract. Registry
+membership limits which row an advisory message may update, but it does not prove
+who sent the message, its byte integrity, or worker correctness. The local demo
+must not expose this HTTP route as a production trust signal; TLS, signed
+heartbeats, node provisioning, and PKI remain outside this boundary.
+
+`GET /health` accepts no query parameters. It returns
+`{status: "healthy", database: "ready", registered_nodes, accepted_events,
+security_alerts}` only after the database count queries succeed; otherwise it
+returns sanitized 503. It exposes no DSN, path, key, credential, or exception.
+
+`GET /v1/nodes` returns only `node_id`, `registered_at_utc`, nullable
+`last_seen_at_utc`, and nullable `health_status`, ordered deterministically by
+`node_id`. Public keys are deliberately not part of the response, and the API does
+not derive an unconfigured online/offline threshold. `GET /v1/events` returns
+accepted records newest-first with a stable internal tie-breaker as
+`{accepted_at_utc, event}`; `event` is the full normalized metadata-only
+`DetectionEvent`. Neither response can contain pixels, crops, tensors, local media
+paths, signatures, or key material.
+
+Both collection endpoints use an optional decimal `limit` that defaults to 50 and
+is bounded from 1 through 100. Duplicate, unknown, malformed, zero, or oversized
+query values return 422 `invalid_request`; query or stored-row uncertainty returns
+sanitized 503. Empty collections return an empty JSON array.
 
 ## Milestone 1 wire contracts
 
@@ -121,8 +165,8 @@ representation of a 64-byte Ed25519 signature. This layer validates only the
 wire representation. Deterministic canonicalization and the reusable Ed25519
 signing/verification primitives are separate domain layers. The process-local
 freshness/replay policy described below is another separate domain layer. The
-authenticated ingestion route now composes these layers; other aggregator routes
-remain later Milestone 1 tasks.
+authenticated ingestion route composes these layers. Monitoring routes reuse the
+strict metadata contracts but do not reinterpret signatures as semantic truth.
 A valid signature will establish origin and byte integrity, not the semantic
 correctness of a detection.
 
